@@ -1,0 +1,20 @@
+{
+  "name": "Lab meeting",
+  "type": "meeting",
+  "repeat": "weekly",
+  "days": ["fri"],
+  "time": "14:00",
+  "minutes": 60,
+  "timeZone": "America/New_York",
+  "setup": {
+    "agenda": "Each person reports progress, then one paper is discussed",
+    "goals": "Get feedback on the next ablation",
+    "myRole": "presenter",
+    "responseStyle": { "length": "detailed", "format": "bullets", "tone": "conversational" }
+  },
+  "purpose": "Weekly lab meeting of the reading group",
+  "participants": ["Prof. Li (advisor)", "Wang Fang", "Sam Lee"],
+  "instructions": "Quote numbers from the results files. Say when a result rests on few runs.",
+  "memory": true,
+  "files": ["./lab/plan.md", "./results/summary.md"]
+}

@@ -1,0 +1,5 @@
+# In ~/.codex/config.toml, or: codex mcp add prepped -- npx -y prepped mcp --connection my-tool
+# On Windows: command = "cmd" and args = ["/c", "npx", "-y", "prepped", "mcp", "--connection", "my-tool"]
+[mcp_servers.prepped]
+command = "npx"
+args = ["-y", "prepped", "mcp", "--connection", "my-tool"]

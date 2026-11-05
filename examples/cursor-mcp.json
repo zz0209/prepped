@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "prepped": {
+      "type": "stdio",
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "prepped", "mcp", "--connection", "my-tool"]
+    }
+  }
+}

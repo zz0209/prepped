@@ -1,0 +1,43 @@
+{
+  "name": "prepped",
+  "version": "0.29.4",
+  "description": "Use Prepped from Claude Code, Codex, Cursor, Antigravity and other coding agents: an MCP server and a command line that set up meetings, weekly meetings, material, resumes and practice.",
+  "license": "MIT",
+  "author": "Shawn ZZ",
+  "homepage": "https://ai-overlay-alpha.fly.dev/docs/coding-agents/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zz0209/prepped.git",
+    "directory": "agent"
+  },
+  "bugs": {
+    "url": "https://github.com/zz0209/prepped/issues"
+  },
+  "mcpName": "io.github.zz0209/prepped",
+  "type": "module",
+  "bin": {
+    "prepped": "dist/prepped.mjs"
+  },
+  "files": [
+    "dist/prepped.mjs",
+    "dist/THIRD_PARTY_LICENSES.txt",
+    "skills/prepped/SKILL.md",
+    "skills/prepped/agents-md-snippet.md",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "prepped",
+    "mcp",
+    "mcp-server",
+    "claude-code",
+    "codex",
+    "cursor",
+    "antigravity",
+    "meetings",
+    "interview"
+  ]
+}
