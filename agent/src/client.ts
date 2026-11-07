@@ -17,6 +17,8 @@ export type RequestOptions = { json?: unknown; form?: FormData; query?: Query };
 export class Client {
   // Named in the token's "last used by" in Settings: the command line, or the MCP client that started the server.
   userAgent = `prepped-cli/${version}`;
+  /** This client started the closed desktop app (src/operations.ts perform tells the person). */
+  startedApp = false;
 
   constructor(public target: Target) {}
 
@@ -41,6 +43,7 @@ export class Client {
       const started = await startDesktop(this.target.desktop);
       if (!started) throw new PreppedError('The Prepped desktop app is not running on this computer. Open Prepped and try again.', null, 'DESKTOP_NOT_RUNNING');
       this.target = { ...this.target, url: started };
+      this.startedApp = true;
       response = await fetch(this.address(path, options.query), { method, headers, body });
     }
     if (!response.ok) {

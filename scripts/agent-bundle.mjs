@@ -2,6 +2,25 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import path from 'node:path';
 import { build } from 'esbuild';
 
+export const agentSources = ['cli', 'client', 'config', 'connect', 'detect-client', 'main', 'mcp', 'operations']
+  .map(name => `agent/src/${name}.ts`);
+const sharedSources = new Set([
+  'agent-access', 'agent-client-identity', 'answer-frames', 'interview-fields', 'job-target', 'languages',
+  'meeting-limit', 'meeting-options', 'overlay-inputs', 'question-categories', 'session-inputs', 'text-limits',
+].map(name => `shared/${name}.ts`));
+
+/** Both the standalone bundle and the public Git export use the same reviewed source boundary. */
+export function publicSharedFiles(metafile) {
+  const shared = [];
+  for (const input of Object.keys(metafile.inputs)) {
+    const file = input.replaceAll('\\', '/');
+    if (file.split('/').includes('node_modules') || file === 'agent/package.json' || agentSources.includes(file)) continue;
+    if (!sharedSources.has(file)) throw new Error(`The MCP build imports an unreviewed source: ${file}`);
+    shared.push(file);
+  }
+  return shared.sort();
+}
+
 // The `prepped` command for coding tools (docs/AGENT_INTERFACE.md): one ES module with every dependency in it, so it
 // needs nothing else and runs with Node 20 or newer on Windows and macOS. It goes to agent/dist for the npm package
 // `prepped` (scripts/build-agent.mjs) and to dist/agent inside the desktop app, which starts it with its own runtime
@@ -31,7 +50,9 @@ export async function bundleAgent(outdir) {
     banner: { js: '#!/usr/bin/env node\nimport { createRequire as __preppedRequire } from \'node:module\';\nconst require = __preppedRequire(import.meta.url);' },
     legalComments: 'none',
     metafile: true,
+    write: false,
   });
+  publicSharedFiles(result.metafile);
 
   // Each package the bundle took code from, by its folder in node_modules (a scoped one by both parts of its name).
   const packages = new Map();
@@ -54,4 +75,5 @@ export async function bundleAgent(outdir) {
   const licences = path.join(outdir, 'THIRD_PARTY_LICENSES.txt');
   writeFileSync(licences, `The prepped command bundles these packages.\n\n${notices.join('\n' + '-'.repeat(72) + '\n\n')}`);
   if (!existsSync(licences)) throw new Error('The licence file was not written.');
+  for (const output of result.outputFiles) writeFileSync(output.path, output.contents);
 }

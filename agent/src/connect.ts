@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { Client, PreppedError } from './client.js';
 import { detectClient } from './detect-client.js';
 import { AGENT_TOKEN_PATTERN } from '../../shared/agent-access.js';
-import { GENERIC_AGENT_NAME, agentClientByName } from '../../shared/agent-clients.js';
+import { GENERIC_AGENT_NAME, identityByName } from '../../shared/agent-client-identity.js';
 import { connectionName, connectionPath, desktopDataDirs, desktopUrl, forgetConnection, forgetPending, readConnection, readPending, saveConnection, savePending, startDesktop,
   type Pending, type Saved, type Target } from './config.js';
 
@@ -123,7 +123,7 @@ export async function connect(args: string[], userAgent: string, note: Notes) {
   // Prepped knows.
   const detected = await detectClient();
   const toolName = values.name?.trim() ?? detected.name ?? GENERIC_AGENT_NAME;
-  const client = (values.name ? agentClientByName(values.name) : null) ?? detected.client;
+  const client = (values.name ? identityByName(values.name) : null) ?? detected.client;
   const name = values.name ? connectionName(values.name) : detected.client ? detected.client.id
     : detected.name ? connectionName(detected.name) : `agent-${randomBytes(3).toString('hex')}`;
   const service = values.url ? { url: z.string().url().parse(values.url).replace(/\/+$/, ''), desktop: null } : await runningDesktop(values['data-dir']);
@@ -168,7 +168,7 @@ export async function connect(args: string[], userAgent: string, note: Notes) {
 export async function disconnect(args: string[], userAgent: string) {
   const { values } = parseArgs({ args, options: { name: { type: 'string' } }, strict: true });
   if (!values.name) throw new PreppedError('Give --name with the tool\'s name or its connection name, as prepped connect printed it.', null, 'INVALID_INPUT');
-  const name = agentClientByName(values.name)?.id ?? connectionName(values.name);
+  const name = identityByName(values.name)?.id ?? connectionName(values.name);
   const saved = await readConnection(name);
   if (!saved) throw new PreppedError(`No connection named ${name} on this computer (${connectionPath(name)}).`, null, 'NOT_FOUND');
   const target: Target = saved.url ? { token: saved.token, url: saved.url.replace(/\/+$/, ''), desktop: null }

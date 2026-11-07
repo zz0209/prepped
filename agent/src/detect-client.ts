@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
-import { AGENT_CLIENTS, type AgentClient } from '../../shared/agent-clients.js';
+import { AGENT_IDENTITIES, type AgentIdentity } from '../../shared/agent-client-identity.js';
 
 // Which AI tool runs `prepped connect`, so its connection carries the tool's name and mark without the agent naming
 // itself: an environment variable the tool sets (Claude Code's CLAUDECODE, Gemini CLI's GEMINI_CLI), or the nearest of
@@ -30,14 +30,14 @@ export function programName(file: string): string {
 
 /** A known tool by a process's program, its command line, or a folder of its installation ("code" and "claude" are too
  * common as folder names to count). */
-function knownClient(process: ProcessInfo, program: string): AgentClient | null {
+function knownClient(process: ProcessInfo, program: string): AgentIdentity | null {
   const folders = process.path.toLowerCase().split(/[\\/]/);
-  return AGENT_CLIENTS.find(item => item.programs.includes(program) || (item.commandLine?.test(process.commandLine) ?? false)
+  return AGENT_IDENTITIES.find(item => item.programs.includes(program) || (item.commandLine?.test(process.commandLine) ?? false)
     || item.programs.some(name => name !== 'code' && name !== 'claude' && folders.includes(name))) ?? null;
 }
 
 /** The tool among a chain of processes, nearest first: the first that is a known tool or more than a carrier. */
-export function clientOfChain(chain: readonly ProcessInfo[]): { client: AgentClient | null; name: string | null } {
+export function clientOfChain(chain: readonly ProcessInfo[]): { client: AgentIdentity | null; name: string | null } {
   for (const process of chain) {
     if (!process.path) continue;
     const program = programName(process.path);
@@ -82,8 +82,8 @@ export async function parentChain(): Promise<ProcessInfo[]> {
 }
 
 /** The tool running this command: by its environment variable, otherwise by the parent processes. */
-export async function detectClient(env: NodeJS.ProcessEnv = process.env): Promise<{ client: AgentClient | null; name: string | null }> {
-  const byEnv = AGENT_CLIENTS.find(client => client.env?.some(variable => env[variable]));
+export async function detectClient(env: NodeJS.ProcessEnv = process.env): Promise<{ client: AgentIdentity | null; name: string | null }> {
+  const byEnv = AGENT_IDENTITIES.find(client => client.env?.some(variable => env[variable]));
   if (byEnv) return { client: byEnv, name: byEnv.name };
   return clientOfChain(await parentChain());
 }

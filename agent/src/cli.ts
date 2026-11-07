@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { version } from '../package.json';
 import { Client, PreppedError } from './client.js';
 import { configPath, desktopDataDirs, desktopUrl, forget, resolveTarget, save, type Target } from './config.js';
-import { OPERATIONS, type Context, type Operation } from './operations.js';
+import { OPERATIONS, perform, type Context, type Operation } from './operations.js';
 import { connect, disconnect } from './connect.js';
 import { AGENT_TOKEN_PATTERN } from '../../shared/agent-access.js';
 
@@ -186,7 +186,7 @@ export async function runCli(argv: string[], output: Output): Promise<number> {
     if (!operation) throw new PreppedError(`Unknown command: ${[first, second].filter(Boolean).join(' ')}. Run prepped --help.`);
     const rest = argv.slice(commandOf(operation).length);
     if (rest.includes('--help') || rest.includes('-h')) { output.out(operationHelp(operation)); return 0; }
-    print(await operation.run(cliContext(userAgent), operation.input.parse(await inputOf(operation, rest))));
+    print(await perform(operation, cliContext(userAgent), operation.input.parse(await inputOf(operation, rest))));
     return 0;
   } catch (error) {
     output.err(JSON.stringify(failure(error), null, 2));
