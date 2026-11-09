@@ -1,6 +1,6 @@
 {
   "name": "prepped",
-  "version": "0.30.0",
+  "version": "0.30.2",
   "description": "Use Prepped from Claude Code, Codex, Cursor, Antigravity and other coding agents: an MCP server and a command line that set up meetings, weekly meetings, material, resumes and practice.",
   "license": "MIT",
   "author": "Shawn ZZ",
