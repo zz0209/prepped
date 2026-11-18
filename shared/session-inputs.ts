@@ -51,7 +51,7 @@ export function defaultResponseStyle(): ResponseStyle { return responseStyleSche
 export const MEETING_ROLES = ['host', 'presenter', 'participant', 'observer'] as const;
 export const MEDIA_ROLES = ['interviewee', 'interviewer'] as const;
 // Questions the person expects in this conversation; preparation writes an answer for each.
-export const expectedQuestionsSchema = z.array(z.string().trim().min(3).max(600)).max(40);
+export const expectedQuestionsSchema = z.array(z.string().trim().min(1).max(600)).max(40);
 // The language people speak in the conversation, for speech recognition; 'auto' leaves it to the recognizer.
 export const SPEECH_LANGUAGES = ['auto', 'en', 'zh', 'yue', 'ja', 'ko'] as const;
 export type SpeechLanguage = typeof SPEECH_LANGUAGES[number];
@@ -73,7 +73,7 @@ export const DEFAULT_OTHER_SIDE: Record<SessionMode, OtherSide> = { general: 'co
 // newestResumeId); before 0.24.0 only interviews had one.
 const style = {
   responseStyle: responseStyleSchema.optional().describe('How Prepped\'s answers read in this meeting. Give only the fields the person\'s words or the meeting call for; the others keep their defaults.'),
-  expectedQuestions: expectedQuestionsSchema.default([]).describe('Questions the person says they expect or were sent, one each in their words; preparation writes an answer for each. Leave it empty rather than guess.'),
+  expectedQuestions: expectedQuestionsSchema.default([]).describe('Questions or discussion topics the person expects or was sent, one entry each in their own words. A topic or description is welcome even without a specific question. Preparation finds relevant facts; practice turns topics into concrete questions and preserves specific questions. Leave it empty unless the person supplied entries.'),
   speechLanguage: z.enum(SPEECH_LANGUAGES).default('auto').describe('The language spoken in the meeting, for speech recognition (the answer language is the meeting\'s language). auto (default): more than one language is spoken, or it is not known. One code when everyone speaks it: en, zh (Mandarin), yue (Cantonese), ja, ko. Example: an English podcast: en; a Japanese client and a Chinese-speaking person: auto.'),
   otherSide: otherSideField('computer'),
   resumeId: z.string().uuid().nullable().default(null).describe('The person\'s resume (resumes_list) that answers use as their background, in every meeting type. Left out, a new meeting takes the most recently changed one. A resume file the person gives: import it (resumes_import), write its content from the file with resumes_update (answers read the content; resumes_import with read has a model do it, paid), and give its id. null: the person wants none.'),

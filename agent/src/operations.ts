@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { TZDate } from '@date-fns/tz';
 import { z } from 'zod';
@@ -9,6 +9,7 @@ import { ANSWER_FRAMES, FRAME_IDS, defaultFrame } from '../../shared/answer-fram
 import { DIFFICULTIES, QUESTION_CATEGORIES } from '../../shared/question-categories.js';
 import { ANSWER_MODES, ANSWER_WAITS, TRANSLATION_LANGUAGES } from '../../shared/meeting-options.js';
 import { MATERIAL_LIMITS, TEXT_LIMITS } from '../../shared/text-limits.js';
+import { dataExtensions } from '../../shared/data-formats.js';
 import { JOB_STAGES } from '../../shared/job-target.js';
 import { hasMeetingLimit, NO_MEETING_LIMIT_MICRO } from '../../shared/meeting-limit.js';
 import { appearanceChange, quickActionsChange } from '../../shared/overlay-inputs.js';
@@ -41,7 +42,7 @@ const timeZone = z.string().describe('IANA time zone such as America/New_York or
 const participants = z.array(z.string().min(1).max(120)).max(50).describe('The other people in the meeting, as names with their roles if known, such as "Dana (manager)"');
 const purpose = z.string().max(4000).describe('What the meeting is for, in a sentence or a few');
 const instructions = z.string().max(4000).describe('Standing instructions for the answers Prepped writes in this meeting: facts and requirements no field covers, such as the graduation date, how to state work authorization, the experiences to stress, the questions to ask at the start. No words about length or style (concise, brief, short): they override setup.responseStyle, which holds the length, tone and form; the answer language goes in language.');
-const files = z.array(z.string().min(1)).describe('Paths of files on this computer to attach as material: PDF, DOCX, PPTX, TXT, Markdown, CSV or JSON, up to 8 MB each. Relative paths start at the current folder. A presentation\'s own slides go in with talk_slides.');
+const files = z.array(z.string().min(1)).describe(`Local documents (PDF, DOCX, PPTX, TXT, Markdown) or datasets (${dataExtensions.join(', ')}) up to 8 MiB each. Relative paths start at the current folder. Use talk_slides for the presentation deck.`);
 const urls = z.array(z.string().url()).describe('Web pages, PDFs on the web or Google Docs/Slides/Sheets shared by link, read now and attached as material');
 const model = z.string().min(1).max(100).describe('A model id from `whoami` (its models with available: true). Leave it out: Prepped chooses the model for the meeting type. Give one only when the person names it.');
 const language = z.enum(LANGUAGE_CODES).describe('Language code, or auto');
@@ -58,7 +59,7 @@ const switchesOf = (input: { answers?: string; keepRecord?: boolean; limitUsd?: 
   ...(input.limitUsd !== undefined ? { sessionLimitMicro: input.limitUsd === null ? NO_MEETING_LIMIT_MICRO : Math.round(input.limitUsd * 1e6) } : {}), ...(input.speed ? { serviceTier: input.speed } : {}),
 });
 
-const MATERIAL_TYPES = ['.pdf', '.docx', '.pptx', '.txt', '.md', '.csv', '.json'];
+const MATERIAL_TYPES = ['.pdf', '.docx', '.pptx', '.txt', '.md', ...dataExtensions.map(extension => '.' + extension)];
 // A presentation's deck (server/talk-deck.ts), and its draft script as a file.
 const DECK_TYPES = ['.pptx', '.pdf'];
 const DECK_BYTES = 80 * 1024 * 1024;
@@ -144,7 +145,8 @@ async function readMaterial(context: Context, input: { files?: string[]; urls?: 
   const parts: Material['parts'] = [];
   for (const file of input.files ?? []) {
     const full = path.resolve(context.cwd, file);
-    if (!MATERIAL_TYPES.includes(path.extname(full).toLowerCase())) throw new PreppedError(`${full}: Prepped takes PDF, DOCX, PPTX, TXT, Markdown, CSV or JSON files as material. Convert it, or attach its text with \`text\`.`);
+    if (!MATERIAL_TYPES.includes(path.extname(full).toLowerCase())) throw new PreppedError(`${full}: supported material files are ${MATERIAL_TYPES.join(', ')}.`);
+    if ((await stat(full)).size > 8 * 1024 * 1024) throw new PreppedError(`${full}: each material upload can be up to 8 MiB.`);
     parts.push({ blob: new Blob([await readFile(full)]), name: path.basename(full) });
   }
   if (input.text !== undefined) {

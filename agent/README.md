@@ -30,7 +30,7 @@ When the desktop app is closed, the first request starts it in the background. O
 
 - Create, change, copy and delete meetings; read the transcript, questions and answers of a past one.
 - Set up weekly or monthly meetings, with material and a memory shared by every meeting in the series.
-- Attach files from your computer (PDF, DOCX, PPTX, TXT, Markdown, CSV, JSON), web pages and notes; add project folders and GitHub or other Git repositories, which Prepped indexes and searches during the meeting.
+- Attach documents (PDF, DOCX, PPTX, TXT, Markdown), data files (CSV, TSV, XLSX, JSON, JSONL, NDJSON, Parquet, TIFF), web pages and notes. Prepped can calculate from the original data during a meeting. You can also add project folders and Git repositories for search.
 - Start, pause and check a meeting's preparation, and read the questions and answers it prepared.
 - Give a talk or a defense its slides, draft script and outline.
 - Set up meetings from calendar events, manage resumes, the question bank and interview practice.

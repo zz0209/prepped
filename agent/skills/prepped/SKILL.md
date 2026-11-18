@@ -62,7 +62,7 @@ Prepped prepares it by itself on this computer: keep Prepped running until it is
 
 When the person points to files or folders ("用这个文件夹里的资料", "the slides in ./talk"), read them yourself first, then attach what matters:
 
-- Files (PDF, DOCX, PPTX, TXT, Markdown, CSV, JSON, up to 8 MB): `--files <path>` on `meetings create` / `groups create`, or `prepped material add --meeting <id> --files <path> --files <path>`. Use absolute paths. A meeting or a group holds up to 8 documents (200,000 characters in all): attach the ones that matter most and add a folder of the rest as a project.
+- Attach local files with `--files <path>` on `meetings create` or `groups create`, or use `prepped material add --meeting <id> --files <path> --files <path>`. Use absolute paths. Documents can be PDF, DOCX, PPTX, TXT or Markdown. CSV, TSV, XLSX, JSON, JSONL, NDJSON, Parquet and TIFF are available for calculations during the meeting. Each upload can be up to 8 MiB. Each meeting or group holds up to 8 documents and 200,000 characters of extracted text. Add a project folder for additional files.
 - Anything else (spreadsheets in other formats, notes scattered in chat): write the useful text into `--text "…" --text-name requirements.md`.
 - Web pages and shared Google Docs: `--urls <address>`.
 - A code project or a folder of work: `prepped projects add --meeting <id> --folder <absolute path>` (desktop app only), or `--github owner/name`. Prepped indexes it and only reads it; `prepped projects get <project>` shows whether it is ready and whether it was cut short (`truncated`), in which case add its important subfolders as their own projects. `prepped projects update <project> --brief "…"` writes what the project is in the person's words, which answers read first.

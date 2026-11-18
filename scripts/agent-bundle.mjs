@@ -5,7 +5,7 @@ import { build } from 'esbuild';
 export const agentSources = ['cli', 'client', 'config', 'connect', 'detect-client', 'main', 'mcp', 'operations']
   .map(name => `agent/src/${name}.ts`);
 const sharedSources = new Set([
-  'agent-access', 'agent-client-identity', 'answer-frames', 'interview-fields', 'job-target', 'languages',
+  'agent-access', 'agent-client-identity', 'answer-frames', 'data-formats', 'interview-fields', 'job-target', 'languages',
   'meeting-limit', 'meeting-options', 'overlay-inputs', 'question-categories', 'session-inputs', 'text-limits',
 ].map(name => `shared/${name}.ts`));
 
@@ -53,10 +53,14 @@ export async function bundleAgent(outdir) {
     write: false,
   });
   publicSharedFiles(result.metafile);
+  writeBundleLicenses(result.metafile, path.join(outdir, 'THIRD_PARTY_LICENSES.txt'), 'The prepped command');
+  for (const output of result.outputFiles) writeFileSync(output.path, output.contents);
+}
 
+export function writeBundleLicenses(metafile, licences, product, supplied = 'agent/licenses') {
   // Each package the bundle took code from, by its folder in node_modules (a scoped one by both parts of its name).
   const packages = new Map();
-  for (const input of Object.keys(result.metafile.inputs)) {
+  for (const input of Object.keys(metafile.inputs)) {
     const parts = input.replaceAll('\\', '/').split('/');
     const at = parts.lastIndexOf('node_modules');
     if (at < 0) continue;
@@ -67,13 +71,11 @@ export async function bundleAgent(outdir) {
   const notices = [...packages].sort(([a], [b]) => a.localeCompare(b)).map(([name, folder]) => {
     const manifest = JSON.parse(readFileSync(path.join(folder, 'package.json'), 'utf8'));
     const own = readdirSync(folder).find(entry => /^(licen[cs]e|copying)(\.(md|txt))?$/i.test(entry));
-    const kept = path.join('agent', 'licenses', `${name.replace('/', '__')}.LICENSE`);
+    const kept = path.join(supplied, `${name.replace('/', '__')}.LICENSE`);
     const file = own ? path.join(folder, own) : existsSync(kept) ? kept : null;
     if (!file) throw new Error(`${name} has no licence file in ${folder}; put its licence text in ${kept} before publishing.`);
     return `${name} ${manifest.version} (${manifest.license})\n\n${readFileSync(file, 'utf8').trim()}\n`;
   });
-  const licences = path.join(outdir, 'THIRD_PARTY_LICENSES.txt');
-  writeFileSync(licences, `The prepped command bundles these packages.\n\n${notices.join('\n' + '-'.repeat(72) + '\n\n')}`);
+  writeFileSync(licences, `${product} bundles these packages.\n\n${notices.join('\n' + '-'.repeat(72) + '\n\n')}`);
   if (!existsSync(licences)) throw new Error('The licence file was not written.');
-  for (const output of result.outputFiles) writeFileSync(output.path, output.contents);
 }
