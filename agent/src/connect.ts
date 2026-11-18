@@ -57,8 +57,8 @@ async function runningDesktop(dataDir: string | undefined): Promise<{ url: strin
     const url = await startDesktop(dir);
     if (url) return { url, desktop: dir };
   }
-  if (installed.length) throw new PreppedError('Prepped is on this computer but not open. Open the Prepped app, then run npx -y prepped connect again.', null, 'DESKTOP_NOT_RUNNING');
-  throw new PreppedError('The Prepped desktop app has not run on this computer. Install and open it, then run npx -y prepped connect again; or connect to Prepped on the web with --url <its address>.', null, 'DESKTOP_MISSING');
+  if (installed.length) throw new PreppedError('Prepped is on this computer but not open. Open the Prepped app, then run npx -y prepped@latest connect again.', null, 'DESKTOP_NOT_RUNNING');
+  throw new PreppedError('The Prepped desktop app has not run on this computer. Install and open it, then run npx -y prepped@latest connect again; or connect to Prepped on the web with --url <its address>.', null, 'DESKTOP_MISSING');
 }
 
 /** Opens the page where the person allows the request; the address is in the notes too, for a computer with no browser. */
@@ -74,7 +74,7 @@ async function waitForAnswer(url: string, pending: Pending, userAgent: string, w
   const until = Math.min(Date.now() + waitMs, Date.parse(pending.expiresAt) + POLL_MS);
   for (;;) {
     const { status, data } = await unsigned<{ status: string; token?: string }>(url, 'GET', `/api/agent/pair/${pending.id}`, userAgent);
-    if (status === 404) throw new PreppedError('The request ended before it was allowed (a request lasts ten minutes). Run npx -y prepped connect again.', null, 'AGENT_PAIR_ENDED');
+    if (status === 404) throw new PreppedError('The request ended before it was allowed (a request lasts ten minutes). Run npx -y prepped@latest connect again.', null, 'AGENT_PAIR_ENDED');
     if (data.status === 'approved') return z.string().regex(AGENT_TOKEN_PATTERN).parse(data.token);
     if (data.status === 'denied') throw new PreppedError('The request was declined in Prepped.', null, 'AGENT_PAIR_DENIED');
     if (Date.now() + POLL_MS > until) return null;
@@ -96,7 +96,7 @@ async function revoke(target: Target, userAgent: string): Promise<boolean> {
  * which every tool passes (some do not pass their settings' environment variables). */
 export function mcpServerFor(name: string) {
   const windows = process.platform === 'win32';
-  const server = { command: windows ? 'cmd' : 'npx', args: [...(windows ? ['/c', 'npx'] : []), '-y', 'prepped', 'mcp', '--connection', name] };
+  const server = { command: windows ? 'cmd' : 'npx', args: [...(windows ? ['/c', 'npx'] : []), '-y', 'prepped@latest', 'mcp', '--connection', name] };
   const line = [server.command, ...server.args].join(' ');
   const home = os.homedir();
   return {
@@ -135,7 +135,7 @@ export async function connect(args: string[], userAgent: string, note: Notes) {
   else {
     const { data: asked } = await unsigned<{ id: string; code: string; expiresAt: string; approveUrl: string | null }>(service.url, 'POST', '/api/agent/pair', userAgent,
       { name: toolName, paid: Boolean(values.paid), client: client?.id ?? null });
-    if (!service.desktop && !asked.approveUrl) throw new PreppedError(`${service.url} is a Prepped desktop app's local address. Run npx -y prepped connect without --url on that computer.`, null, 'INVALID_INPUT');
+    if (!service.desktop && !asked.approveUrl) throw new PreppedError(`${service.url} is a Prepped desktop app's local address. Run npx -y prepped@latest connect without --url on that computer.`, null, 'INVALID_INPUT');
     pending = { id: asked.id, code: asked.code, url: service.url, desktop: service.desktop, expiresAt: asked.expiresAt, approveUrl: asked.approveUrl };
     await savePending(name, pending);
     if (service.desktop) note(`Prepped is showing a request from "${toolName}" with the code ${asked.code}. Allow it there.`);

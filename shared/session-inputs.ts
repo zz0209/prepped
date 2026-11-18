@@ -6,6 +6,11 @@ export { INTERVIEW_FIELDS, INTERVIEW_ROUNDS };
 
 export const SESSION_MODES = ['general', 'meeting', 'interview', 'media', 'presentation', 'research'] as const;
 export type SessionMode = typeof SESSION_MODES[number];
+export const jobPostingSourceSchema = z.object({
+  url: z.url({ protocol: /^https?$/ }).max(2000).nullable(),
+  location: z.string().trim().max(TEXT_LIMITS.setupLine).default(''),
+}).strict();
+export type JobPostingSource = z.infer<typeof jobPostingSourceSchema>;
 // Every answer of a meeting sends its setup in full, so each text field has a length limit: one-line fields, longer
 // fields, and the job description.
 const LINE = TEXT_LIMITS.setupLine, AREA = TEXT_LIMITS.setupArea;
@@ -32,7 +37,7 @@ export type AnswerForm = typeof ANSWER_FORMS[number];
 // give (agent/src/operations.ts `types` shows them): when to choose each value, the default, and an example.
 export const responseStyleSchema = z.object({
   form: z.enum(ANSWER_FORMS).default('plain').describe('How the person uses an answer while speaking. plain (default): an answer they say in their own words; keep it for interviews, recruiter calls and other live calls where they answer aloud. script: they read it aloud word for word ("read it out", "word for word", a scripted Q&A). cues: short cues they talk from, only when the person asks for keyword cards, and then not with length concise; cues leave out what to say, so a person answering a recruiter or an interviewer gets too little from them.'),
-  length: z.enum(['concise', 'balanced', 'detailed']).default('concise').describe('Set it from what the person says about answers, never from the meeting type or their role. balanced: every meeting, talk and interview when the person says nothing about length; an open question then gets what they did, used and measured, and a short factual one stays short. concise: only when the person asks for short answers ("keep it short", "简短"). detailed: only when the person asks for detailed or in-depth answers ("详细"). A presenter in a lab meeting, a recruiter call or a 1:1 is still balanced unless they say otherwise.'),
+  length: z.enum(['concise', 'balanced', 'detailed']).default('balanced').describe('Set it from what the person says about answers, never from the meeting type or their role. balanced (default): every meeting, talk and interview when the person says nothing about length; an open question then gets what they did, used and measured, and a short factual one stays short. concise: only when the person asks for short answers ("keep it short", "简短"). detailed: only when the person asks for detailed or in-depth answers ("详细"). A presenter in a lab meeting, a recruiter call or a 1:1 is still balanced unless they say otherwise.'),
   format: z.enum(['paragraphs', 'bullets', 'steps']).default('paragraphs').describe('paragraphs (default): answers said aloud, as in interviews and calls. bullets: only when the person asks for points to glance at. steps: answers that walk through a procedure.'),
   tone: z.enum(['professional', 'conversational', 'formal']).default('professional').describe('professional (default). conversational: casual settings, podcasts, friendly chats, or the person says "casual". formal: a board, officials, a committee or defense.'),
   tradeOffs: z.boolean().default(false).describe('true when answers should weigh options and their costs (design reviews, system design, decisions to make); default false.'),
@@ -57,6 +62,12 @@ export const SPEECH_LANGUAGE_NAMES: Record<Exclude<SpeechLanguage, 'auto'>, stri
 // answer, so their words are kept as theirs. A phone's own meeting always hears the other side nearby.
 export const OTHER_SIDES = ['computer', 'nearby'] as const;
 export type OtherSide = typeof OTHER_SIDES[number];
+// A talk or a defense is given in the room, so a presentation hears the other side nearby unless the person says it
+// is given in a video call; every other type starts on this computer.
+function otherSideField(fallback: OtherSide) {
+  return z.enum(OTHER_SIDES).default(fallback).describe(`Where Prepped hears the other side; default ${fallback}. computer: a video call or call app on this computer${fallback === 'nearby' ? ', for a talk given in a video call' : ''}. nearby: the same room, or a phone on speaker beside the computer (one microphone hears both sides; the person holds a button while they answer).`);
+}
+export const DEFAULT_OTHER_SIDE: Record<SessionMode, OtherSide> = { general: 'computer', research: 'computer', interview: 'computer', meeting: 'computer', media: 'computer', presentation: 'nearby' };
 // `resumeId`: the person's resume that answers and preparation use as their background, in every type of meeting; null
 // when the person chose none. New meetings start with the most recently updated resume (server/groups.ts
 // newestResumeId); before 0.24.0 only interviews had one.
@@ -64,7 +75,7 @@ const style = {
   responseStyle: responseStyleSchema.optional().describe('How Prepped\'s answers read in this meeting. Give only the fields the person\'s words or the meeting call for; the others keep their defaults.'),
   expectedQuestions: expectedQuestionsSchema.default([]).describe('Questions the person says they expect or were sent, one each in their words; preparation writes an answer for each. Leave it empty rather than guess.'),
   speechLanguage: z.enum(SPEECH_LANGUAGES).default('auto').describe('The language spoken in the meeting, for speech recognition (the answer language is the meeting\'s language). auto (default): more than one language is spoken, or it is not known. One code when everyone speaks it: en, zh (Mandarin), yue (Cantonese), ja, ko. Example: an English podcast: en; a Japanese client and a Chinese-speaking person: auto.'),
-  otherSide: z.enum(OTHER_SIDES).default('computer').describe('Where Prepped hears the other side. computer (default): a video call or call app on this computer. nearby: the same room, or a phone on speaker beside the computer (one microphone hears both sides; the person holds a button while they answer).'),
+  otherSide: otherSideField('computer'),
   resumeId: z.string().uuid().nullable().default(null).describe('The person\'s resume (resumes_list) that answers use as their background, in every meeting type. Left out, a new meeting takes the most recently changed one. A resume file the person gives: import it (resumes_import), write its content from the file with resumes_update (answers read the content; resumes_import with read has a model do it, paid), and give its id. null: the person wants none.'),
   translateInto: z.union([z.enum(TRANSLATION_LANGUAGES), z.literal(AUTO_TRANSLATION), z.literal(NO_TRANSLATION)]).nullable().optional()
     .describe('The live translation of the other side during this meeting, on whichever computer runs it: "auto" translates into the app\'s interface language there (use it when the person asks for translation); a language code only when the person names that language; "none" for no translation') };
@@ -101,7 +112,7 @@ export const sessionSetupSchema = z.discriminatedUnion('mode', [
     offLimitTopics: describedText('Topics the person wants to stay away from.'),
     questionOutline: describedText('Questions the host sent in advance.'),
   }).strict(),
-  z.object({ mode: z.literal('presentation'), ...style,
+  z.object({ mode: z.literal('presentation'), ...style, otherSide: otherSideField(DEFAULT_OTHER_SIDE.presentation),
     title: describedText('The talk\'s title, from the person, the deck\'s first slide or the invitation.'),
     audience: describedText('Who listens: a thesis committee, the team, investors, a conference.'),
     abstract: describedText('What the talk covers, in a few sentences, from the person, the deck or the paper.'),
@@ -109,7 +120,7 @@ export const sessionSetupSchema = z.discriminatedUnion('mode', [
   }).strict(),
 ]).transform(setup => ({ ...setup, responseStyle: setup.responseStyle ?? {
   ...defaultResponseStyle(),
-  length: setup.mode === 'interview' && setup.answerStyle === 'detailed' ? 'detailed' as const : 'concise' as const,
+  length: setup.mode === 'interview' && setup.answerStyle === 'detailed' ? 'detailed' as const : 'balanced' as const,
   behavioral: setup.mode === 'interview' && setup.answerStyle === 'star' ? 'star' as const : 'auto' as const,
 } }));
 

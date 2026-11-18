@@ -120,7 +120,7 @@ export async function resolveTarget(): Promise<Target> {
   if (process.env.PREPPED_CONNECTION) {
     const name = process.env.PREPPED_CONNECTION.trim();
     const connection = await readConnection(name);
-    if (!connection) throw new Error(`This tool's connection to Prepped (${connectionPath(name)}) is gone. Connect it again: in Prepped, Settings › Connections, or run npx -y prepped connect.`);
+    if (!connection) throw new Error(`This tool's connection to Prepped (${connectionPath(name)}) is gone. Connect it again: in Prepped, Settings › Connections, or run npx -y prepped@latest connect.`);
     if (connection.url) return { token: connection.token, url: connection.url.replace(/\/+$/, ''), desktop: null };
     return desktopTarget(connection.token, connection.desktop!.dataDir);
   }
@@ -131,7 +131,7 @@ export async function resolveTarget(): Promise<Target> {
     throw new Error('PREPPED_TOKEN is set without PREPPED_URL (the Prepped web address) or PREPPED_DESKTOP=1 (the Prepped desktop app on this computer).');
   }
   const saved = await readSaved();
-  if (!saved) throw new Error('Not connected to Prepped. Run npx -y prepped connect --name "<your name as a tool>" and the person allows it in Prepped; or, in Prepped, open Settings › Connections and connect the tool there.');
+  if (!saved) throw new Error('Not connected to Prepped. Run npx -y prepped@latest connect --name "<your name as a tool>" and the person allows it in Prepped; or, in Prepped, open Settings › Connections and connect the tool there.');
   if (saved.url) return { token: saved.token, url: saved.url.replace(/\/+$/, ''), desktop: null };
   return desktopTarget(saved.token, saved.desktop!.dataDir);
 }

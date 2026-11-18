@@ -3,7 +3,7 @@
     "prepped": {
       "type": "stdio",
       "command": "cmd",
-      "args": ["/c", "npx", "-y", "prepped", "mcp", "--connection", "my-tool"]
+      "args": ["/c", "npx", "-y", "prepped@latest", "mcp", "--connection", "my-tool"]
     }
   }
 }

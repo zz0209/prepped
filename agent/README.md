@@ -15,10 +15,14 @@ The tool reads the file, picks the meeting type and its fields, and creates the 
 **Any other agent.** Ask it to run:
 
 ```bash
-npx -y prepped connect
+npx -y prepped@latest connect
 ```
 
-Prepped shows the request with the tool's name and a code. Check that the code matches and click **Allow**. The command then prints the MCP server entry to add (`npx -y prepped mcp --connection <name>`) and how Claude Code, Codex, Cursor and Antigravity add it. If it prints `"status": "waiting"`, allow the request and run the same command again; it continues the same request. For Prepped on the web, add `--url https://<your Prepped address>`. This needs Node.js 20 or later.
+Prepped shows the request with the tool's name and a code. Check that the code matches and click **Allow**. The command then prints the MCP server entry to add (`npx -y prepped@latest mcp --connection <name>`) and how Claude Code, Codex, Cursor and Antigravity add it. If it prints `"status": "waiting"`, allow the request and run the same command again; it continues the same request. For Prepped on the web, add `--url https://<your Prepped address>`. This needs Node.js 20 or later.
+
+The `@latest` entry checks for the current published package when your tool starts its MCP connection. Existing connections and access keys stay in place. Restart the MCP connection or open a new tool session to use an update; an ongoing session continues uninterrupted. Connections added by the Prepped desktop app use its bundled MCP server and update with the app.
+
+For an existing npm-based MCP entry, change the package argument from `prepped` or `prepped@<version>` to `prepped@latest`. Keep its `--connection` argument, environment variables and other server settings. The existing authorization continues to work.
 
 When the desktop app is closed, the first request starts it in the background. Only its icon appears in the tray or menu bar.
 

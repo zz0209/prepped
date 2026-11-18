@@ -2,7 +2,7 @@
 type IdentityFields = { name: string; programs: readonly string[]; commandLine?: RegExp; env?: readonly string[] };
 const definitions = {
   'claude-code': {name: 'Claude Code', programs: ['claude'], env: ['CLAUDECODE']},
-  'claude-desktop': {name: 'Claude', programs: ['claude desktop']},
+  'claude-desktop': {name: 'Claude Desktop', programs: ['claude desktop']},
   codex: {name: 'Codex', programs: ['codex', 'chatgpt']},
   cursor: {name: 'Cursor', programs: ['cursor']},
   antigravity: {name: 'Antigravity', programs: ['antigravity']},
@@ -55,5 +55,6 @@ export const GENERIC_AGENT_NAME = 'AI agent';
 
 export function identityByName(name: string): AgentIdentity | null {
   const plain = name.trim().toLowerCase();
+  if (plain === 'claude') return AGENT_IDENTITIES.find(client => client.id === 'claude-desktop')!;
   return AGENT_IDENTITIES.find(client => client.name.toLowerCase() === plain || client.id === plain) ?? null;
 }

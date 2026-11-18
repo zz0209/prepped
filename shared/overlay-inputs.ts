@@ -15,7 +15,14 @@ export const quickActionsChange = z.partialRecord(
 );
 
 const color = z.string().regex(/^#[0-9a-fA-F]{6}$/);
+// How the overlay window is drawn: Prepped's own panel, or the note window of a widely used sticky-note app (macOS
+// Stickies, Microsoft Sticky Notes, 小黄条's transparent desktop note, Zhorn Software's Stickies, Notezilla's ruled
+// paper), with Prepped's controls shown on hover in that app's manner (src/overlay-styles.css). Desktop apps before
+// 0.35.5 report no style.
+export const OVERLAY_STYLES = ['prepped', 'mac-stickies', 'windows-sticky-notes', 'xiaohuangtiao', 'zhorn-stickies', 'notezilla'] as const;
+export type OverlayStyle = typeof OVERLAY_STYLES[number];
 export const appearanceSchema = z.object({
+  style: z.enum(OVERLAY_STYLES).optional(),
   layout: z.enum(['answer', 'list']), glass: z.boolean(), size: z.enum(['small', 'medium', 'large']),
   colors: z.object({ background: color, text: color }).strict(),
   opacity: z.number().min(0.2).max(1),

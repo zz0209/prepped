@@ -2,7 +2,7 @@
 
 The MCP server and command line that let coding tools (Claude Code, Codex, Cursor, Antigravity, Gemini CLI and other MCP clients) work with a [Prepped](https://ai-overlay-alpha.fly.dev) account: meetings and weekly meetings, their material and projects, preparation, talks, calendar events, resumes, the question bank and practice.
 
-Installing and connecting it is described in the package's [README](agent/README.md), which is also its page on [npm](https://www.npmjs.com/package/prepped). In short, ask your tool to run `npx -y prepped connect` and allow the request in Prepped. Ideas for what to ask once it is connected are in [examples/prompts.md](examples/prompts.md).
+Installing and connecting it is described in the package's [README](agent/README.md), which is also its page on [npm](https://www.npmjs.com/package/prepped). Ask your tool to run `npx -y prepped@latest connect` and allow the request in Prepped. The saved MCP command uses the latest published package when the connection starts, keeping its existing access key. Ideas for what to ask once it is connected are in [examples/prompts.md](examples/prompts.md).
 
 ## How it works
 

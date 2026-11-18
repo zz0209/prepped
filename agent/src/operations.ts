@@ -251,7 +251,7 @@ export async function perform(operation: Operation, context: Context, input: unk
   return { ...result as object, tellThePerson: [APP_STARTED, ...told] };
 }
 const prepOut = (prep: any) => prep && ({ status: prep.status, stale: prep.stale, model: prep.model, startedAt: prep.startedAt, finishedAt: prep.finishedAt, error: prep.error,
-  stopReason: prep.stopReason, costMicro: prep.costMicro, progress: prep.progress, topics: prep.topicCount, facts: prep.factCount });
+  stopReason: prep.stopReason, costMicro: prep.costMicro, progress: prep.progress, topics: prep.topicCount });
 // What an agent sees of a presentation's talk (server/talk.ts state): the outline with each section's slides, the deck's
 // slide titles, the draft script (its start, or all of it for talk_get), whether the desktop app follows the slides, and
 // what is written to say.
@@ -339,7 +339,7 @@ export const OPERATIONS: Operation[] = [
     input: {
       autoPrepare: z.boolean().optional().describe('Prepare planned meetings with material by themselves'),
       searchForOtherComputers: z.boolean().optional().describe('Allow other computers of this account to search this computer’s project folders and preparation while it is online. Defaults to true.'),
-      overlay: appearanceChange.optional().describe('Appearance on this desktop: layout (answer or list), glass, size, colors, opacity (0.20–1 in steps of 0.05), and color preset. Text must have at least 4.5:1 contrast.'),
+      overlay: appearanceChange.optional().describe('Appearance on this desktop: style (prepped, or the look of a sticky-note app: mac-stickies, windows-sticky-notes, xiaohuangtiao, zhorn-stickies, notezilla; colors and glass apply to the prepped style), layout (answer or list), glass, size, colors, opacity (0.20–1 in steps of 0.05), and color preset. Text must have at least 4.5:1 contrast.'),
       quickActions: quickActionsChange.optional().describe('Account-wide ordered overlay actions by meeting type. Supply 1–8 action IDs, or null to restore that type’s defaults.'),
       translateButton: z.boolean().optional().describe('Show the Translate quick action in meeting types whose action list includes it.'),
       endAfterSilenceMinutes: z.number().int().min(1).max(60).nullable().optional().describe('End a meeting after this many minutes without speech or use; null: never'),
