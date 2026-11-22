@@ -140,7 +140,8 @@ export async function connect(args: string[], userAgent: string, note: Notes) {
     await savePending(name, pending);
     if (service.desktop) note(`Prepped is showing a request from "${toolName}" with the code ${asked.code}. Allow it there.`);
     else {
-      note(`Open ${asked.approveUrl}, signed in to Prepped, and allow "${toolName}" (code ${asked.code}).`);
+      // The page asks the person to type the code shown here, so only someone who sees this terminal can allow it.
+      note(`Open ${asked.approveUrl}, signed in to Prepped, type the code ${asked.code} there and allow "${toolName}".`);
       if (!values['no-open']) openPage(asked.approveUrl!, note);
     }
   }
@@ -150,7 +151,8 @@ export async function connect(args: string[], userAgent: string, note: Notes) {
   if (!token) {
     const minutes = Math.max(1, Math.round((Date.parse(pending.expiresAt) - Date.now()) / 60_000));
     return { status: 'waiting', connection: name, tool: toolName, code: pending.code, approveUrl: pending.approveUrl, expiresAt: pending.expiresAt,
-      next: [`Tell the person to allow "${toolName}" in Prepped (code ${pending.code})${pending.approveUrl ? ` at ${pending.approveUrl}` : ''}, then run this same command again within ${minutes} minutes: it continues this request.`] };
+      next: [`${pending.approveUrl ? `Tell the person to open ${pending.approveUrl}, signed in to Prepped, type the code ${pending.code} there and allow "${toolName}"`
+        : `Tell the person to allow "${toolName}" in Prepped (code ${pending.code})`}, then run this same command again within ${minutes} minutes: it continues this request.`] };
   }
   await forgetPending(name);
   const target: Target = { token, ...service };

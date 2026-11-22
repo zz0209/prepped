@@ -36,16 +36,17 @@ What the person says or gives, and what it sets:
 - Everyone speaks one language (an English podcast) → `setup.speechLanguage: en`; more than one, or not known → `auto` (the default).
 - A phone on speaker beside the computer, or the same room → `setup.otherSide: nearby`.
 - "Only when I press the button" → `--answers manual`; nearly every turn of the other side is a question for them (a rapid mock interview) → `every`; otherwise leave `judged`.
-- "Confidential", "don't keep a record" → `--input '{"keepRecord":false}'`. A budget for the meeting ("no more than $1") → `--limit-usd 1`.
+- "Confidential", "don't keep a record" → `--input '{"keepRecord":false}'`. A budget for the meeting ("no more than 100 credits") → `--limit-credits 100`.
 - "Translate what they say into Chinese" → `prepped settings update --translation --translate-into zh` (a setting of this computer for every meeting; say that you turned it on).
-- Preparation may cost up to $1 → `prepped settings update --auto-prepare --auto-prepare-limit-usd 1` (planned meetings with material prepare themselves within it); `prep start --max-cost-usd 1` needs the paid permission and their yes.
+- Prepare planned meetings by themselves → `prepped settings update --auto-prepare` (planned meetings with material prepare themselves while the credits cover it); `prep start` needs the paid permission and their yes after they have seen the credits `prep status` expects it to use.
 - The meeting is in their calendar → `prepped calendar events`, then `prepped calendar setup <key>`, so the meeting follows the event and its call link; change its fields afterwards with `meetings update`.
 - A talk given with others → `prepped talk outline` with each of their sections' `presenter`, the minutes adding up to `durationMinutes`.
 - A large project folder → `prepped projects add` for its code and docs folders (such as `src`), leaving out data, outputs, dependencies and builds.
-- A coding interview or a project demo where Prepped should see the screen → tell them to turn on "Read the shared screen when this meeting starts" on the meeting's page in the desktop app (or the overlay's Read screen button during it); it is a choice of that computer.
+- A coding interview, a project demo, or a talk that switches to a live web page, where Prepped should see the screen → `--read-screen` on `meetings create` / `meetings update` (the meeting page's "Read the shared screen when this meeting starts"); it is a choice of this computer, and the overlay's Read screen button turns it on or off during the meeting.
+- "Think before answering" → `--reasoning medium` (or `low`, `high`; `none` for no thinking, `default` back to the model's own) on `meetings create` / `meetings update`; leave it out otherwise.
 - Leave `--model` and `--speed` out unless the person asks; Prepped chooses the model for the meeting type.
 
-A weekly series takes the same choices: how the answers read for every meeting (`myRole`, `responseStyle`, `speechLanguage`) in `--setup`, and the answer language and switches as `--language`, `--answers`, `--keep-record`, `--limit-usd` on `groups create`, which its meetings carry on.
+A weekly series takes the same choices: how the answers read for every meeting (`myRole`, `responseStyle`, `speechLanguage`) in `--setup`, and the answer language and switches as `--language`, `--answers`, `--keep-record`, `--limit-credits` on `groups create`, which its meetings carry on.
 
 The report after creating, for example:
 
@@ -54,7 +55,7 @@ Created "Northwind interview" on Thu 12 Nov, 11:00 (America/New_York):
 - interview, round technical: you said "second round (technical)"
 - field software: the role is Backend Engineer
 - job description from jd.md; resume.md imported and used as your background
-- answers when a turn needs one, record kept, at most $0.25: the defaults
+- answers when a turn needs one, record kept, no credit limit of its own: the defaults
 Prepped prepares it by itself on this computer: keep Prepped running until it is done (closing its window is fine; quitting pauses it until you open Prepped again).
 ```
 
@@ -65,14 +66,14 @@ When the person points to files or folders ("用这个文件夹里的资料", "t
 - Attach local files with `--files <path>` on `meetings create` or `groups create`, or use `prepped material add --meeting <id> --files <path> --files <path>`. Use absolute paths. Documents can be PDF, DOCX, PPTX, TXT or Markdown. CSV, TSV, XLSX, JSON, JSONL, NDJSON, Parquet and TIFF are available for calculations during the meeting. Each upload can be up to 8 MiB. Each meeting or group holds up to 8 documents and 200,000 characters of extracted text. Add a project folder for additional files.
 - Anything else (spreadsheets in other formats, notes scattered in chat): write the useful text into `--text "…" --text-name requirements.md`.
 - Web pages and shared Google Docs: `--urls <address>`.
-- A code project or a folder of work: `prepped projects add --meeting <id> --folder <absolute path>` (desktop app only), or `--github owner/name`. Prepped indexes it and only reads it; `prepped projects get <project>` shows whether it is ready and whether it was cut short (`truncated`), in which case add its important subfolders as their own projects. `prepped projects update <project> --brief "…"` writes what the project is in the person's words, which answers read first.
+- A code project or a folder of work: `prepped projects add --meeting <id> --folder <absolute path>` (desktop app only), or `--github owner/name`. Prepped indexes it and only reads it; `prepped projects get <project>` shows whether it is ready and whether it was cut short (`truncated`), in which case add its important subfolders as their own projects; its overview and the AI coding tools' memory files come by size, and with `--full` by their text. `projects reindex` returns at once with `indexing`; `projects get` shows a new `indexedAt` when it is done. Status `copy`: another project of the meeting or group is the same repository and is read in its place (`sameAs`). `prepped projects update <project> --brief "…"` writes what the project is in the person's words, which answers read first; `--input '{"codingTools":[]}'` leaves the coding tools' memory and session records out (`null` follows the tools found again).
 - Material on a group is read by every meeting of the group.
 
 ## Switches
 
 - The person asks for a meeting to be translated: set `"translateInto": "auto"` in that meeting's or group's setup (meetings_create, meetings_update, groups_create, groups_update), which translates into the app's interface language; a language code such as `"ja"` only when the person names a language, `"none"` when they want none. The desktop app translates the meeting on whichever computer runs it; this computer's translation setting below may be on while the computer the person meets on has it off.
 - The person asks for the live translation in general, another speech recognition, hiding from screen sharing or meeting detection: `prepped settings update --translation --translate-into zh` (and the others; `prepped settings get` shows them under the same names). They are the desktop app's settings on this computer and change at once; a switch turned off is given as JSON (`--input '{"translation":false}'`). `--answer-wait quick|balanced|patient` sets how long the other side's pause lasts before an answer.
-- A meeting's own switches: `--answers every|judged|manual`, `--keep-record`, `--limit-usd <n>`, `--speed standard|ultrafast` on `meetings create` / `meetings update`; how the answers read (length, tone, format) is `setup.responseStyle` (`prepped types`). A series' shared memory: `--memory` on `groups create` / `groups update` (`--input '{"memory":false}'` turns it off).
+- A meeting's own switches: `--answers every|judged|manual`, `--keep-record`, `--limit-credits <n>`, `--speed standard|ultrafast` on `meetings create` / `meetings update`; how the answers read (length, tone, format) is `setup.responseStyle` (`prepped types`). A series' shared memory: `--memory` on `groups create` / `groups update` (`--input '{"memory":false}'` turns it off).
 - Whatever you set reads back under the same names: `settings get`, `meetings get`, `groups get`, `talk get`, `projects get`, `material get` (a document's text), `questions get`.
 - The person does not need to open Prepped for you to set things up: when the desktop app is closed, the first command starts it in the background (only its icon appears, in the taskbar's notification area on Windows or the menu bar on macOS); wait for that answer.
 - A result with `tellThePerson` explains when Prepped started in the background and where it prepares the meeting. In the desktop app it runs on this computer and needs Prepped to keep running until it finishes. Closing the window is fine. Quitting pauses preparation until Prepped opens again. On the web it runs online. Pass each point on in your reply in the person's language, once per reply. `prepped prep status <meeting>` shows how far it is.
@@ -94,6 +95,7 @@ prepped groups create --name "Lab meeting" --type meeting \
 - `--time` is local time in `--time-zone` (default: this computer's, from `whoami`). Without `--first-date`, the first meeting is the next chosen day whose time has not passed. Monthly series need `--first-date` (they fall on that weekday of the month).
 - The answer shows the group, its next meeting times (`schedule.next`) and the first meeting. Tell the person the date and time of the first meeting.
 - Change later with `prepped groups update <group> …` (`--repeat none` stops the series).
+- To prepare this week's meeting of a series, take `prepped groups get <group>` `nextMeeting` and change it with `prepped meetings update <meeting> …` (type, purpose, instructions, material). Do not create another meeting for that day: `meetings create` refuses it and names the meeting to change. A meeting of the series that was not held moves on to the next time by itself, with what was set up for it. A meeting made apart joins the series with `meetings update <meeting> --group <group>`.
 
 ## One meeting
 
@@ -119,13 +121,14 @@ prepped talk get <id>                                                       # se
 ```
 
 - Instead of `talk draft`, write the outline yourself with `prepped talk outline --meeting <id> --input @outline.json` (`{"sections":[{"title":"…","points":["…"],"minutes":3,"fromSlide":1,"toSlide":4}, …]}`): sections in order, taking the slides in order, minutes adding up to `durationMinutes`.
+- `prepped talk write <id> --estimate` says what writing what to say in each section costs; `prepped talk write <id>` (paid, after the person's yes) writes it before the meeting, and `prepped talk get <id> --said` shows it so you and the person can check it. Activating the meeting then writes only the sections changed since.
 - `prepped talk follow --meeting <id> --follow off` stops the desktop app from reading the screen during the talk.
 - Prepare the likely questions as for any meeting (`prep start`, paid).
 
 ## Preparation and money
 
-- Planned meetings with material are prepared by themselves (see `tellThePerson` above for what to tell the person). `prepped prep status <meeting>` shows the state.
-- `prep start`, `resumes import --read`, `questions spoken` and `practice feedback` spend the person's credits. Before running one, tell the person what it does and the most it may cost (for `prep start`, `--max-cost-usd`, such as 0.30), and wait for their yes. A token without the `paid` permission is refused; tell them to create one with it if they want this.
+- Planned meetings with material are prepared by themselves (see `tellThePerson` above for what to tell the person), on the computer that has the meeting's project folders, else on the one it was made on. `prepped prep status <meeting>` shows the state; `automatic.preparedOn` names the computer that prepares it.
+- `prep start`, `talk write`, `resumes import --read`, `questions spoken` and `practice feedback` spend the person's credits. Before running one, tell the person what it does and the credits it is expected to use (for `prep start`, `estimate.credits` of `prep status`, such as 20; for `talk write`, `estimate.credits` of `talk write --estimate`), and wait for their yes. A token without the `paid` permission is refused; tell them to create one with it if they want this.
 
 ## Reading back
 

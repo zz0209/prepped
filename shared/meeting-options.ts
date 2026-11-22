@@ -1,5 +1,10 @@
 export const ANSWER_MODES = ['every', 'judged', 'manual'] as const;
 export const ANSWER_WAITS = ['quick', 'balanced', 'patient'] as const;
+// How long a meeting's model thinks before each answer (server/harness.ts), chosen per meeting; without a choice the
+// model's own default, the quickest it answers well at. A model without one of them uses the nearest higher one it has
+// (server/models.ts effortFor). More thinking writes the first words later and costs more.
+export const ANSWER_EFFORTS = ['none', 'low', 'medium', 'high'] as const;
+export type AnswerEffort = typeof ANSWER_EFFORTS[number];
 export const AUTO_TRANSLATION = 'auto';
 export const NO_TRANSLATION = 'none';
 export const TRANSLATION_LANGUAGES = [

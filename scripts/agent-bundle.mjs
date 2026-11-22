@@ -5,7 +5,7 @@ import { build } from 'esbuild';
 export const agentSources = ['cli', 'client', 'config', 'connect', 'detect-client', 'main', 'mcp', 'operations']
   .map(name => `agent/src/${name}.ts`);
 const sharedSources = new Set([
-  'agent-access', 'agent-client-identity', 'answer-frames', 'data-formats', 'interview-fields', 'job-target', 'languages',
+  'agent-access', 'agent-client-identity', 'answer-frames', 'credit-units', 'data-formats', 'interview-fields', 'job-target', 'languages',
   'meeting-limit', 'meeting-options', 'overlay-inputs', 'question-categories', 'session-inputs', 'text-limits',
 ].map(name => `shared/${name}.ts`));
 

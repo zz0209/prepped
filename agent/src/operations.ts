@@ -7,11 +7,12 @@ import { SESSION_MODES, SETUP_FIELD_LIMITS, sessionSetupSchema, type SessionMode
 import { LANGUAGE_CODES } from '../../shared/languages.js';
 import { ANSWER_FRAMES, FRAME_IDS, defaultFrame } from '../../shared/answer-frames.js';
 import { DIFFICULTIES, QUESTION_CATEGORIES } from '../../shared/question-categories.js';
-import { ANSWER_MODES, ANSWER_WAITS, TRANSLATION_LANGUAGES } from '../../shared/meeting-options.js';
+import { ANSWER_EFFORTS, ANSWER_MODES, ANSWER_WAITS, TRANSLATION_LANGUAGES } from '../../shared/meeting-options.js';
 import { MATERIAL_LIMITS, TEXT_LIMITS } from '../../shared/text-limits.js';
 import { dataExtensions } from '../../shared/data-formats.js';
 import { JOB_STAGES } from '../../shared/job-target.js';
 import { hasMeetingLimit, NO_MEETING_LIMIT_MICRO } from '../../shared/meeting-limit.js';
+import { costForCredits, creditsForCost } from '../../shared/credit-units.js';
 import { appearanceChange, quickActionsChange } from '../../shared/overlay-inputs.js';
 
 // Every operation an agent can ask of Prepped, once: its name, what it does, its input and the HTTP requests it makes
@@ -51,13 +52,41 @@ const answerLanguage = language.describe('The language Prepped answers in. auto 
 const meetingSwitches = {
   answers: z.enum(ANSWER_MODES).optional().describe('When Prepped answers during the meeting. judged (default): the turns that need an answer, right for most meetings. manual: only when the person asks for one ("only when I press the button"). every: each turn of the other side, when nearly every turn is a question for the person (a rapid-fire mock interview).'),
   keepRecord: z.boolean().optional().describe('Keep the meeting\'s transcript and answers after the app closes (default true). false when the person says the meeting is confidential or not to keep a record.'),
-  limitUsd: z.number().min(0).max(99.99).nullable().optional().describe('The most the meeting\'s live answers and writing may spend, in USD. By default the account daily limit applies; null removes the meeting\'s own limit. Give an amount only when the person names a meeting budget.'),
-  speed: z.enum(['standard', 'ultrafast']).optional().describe('How fast the provider serves the meeting\'s answers: standard (default), or ultrafast on supported OpenAI models. Ultrafast costs more and raises an existing meeting limit to at least 1.50 USD unless limitUsd is given. Choose it only when the person asks for faster answers and accepts the cost. Another model returns to standard.'),
+  limitCredits: z.number().min(0).max(9999).nullable().optional().describe('The most credits the meeting\'s live answers and writing may use. By default the meeting uses the account\'s credits without a limit of its own; null removes the meeting\'s own limit. Give a number only when the person names a meeting budget.'),
+  speed: z.enum(['standard', 'ultrafast']).optional().describe('How fast the provider serves the meeting\'s answers: standard (default), or ultrafast on supported OpenAI models. Ultrafast uses more credits for each answer and raises an existing meeting limit to at least 150 credits unless limitCredits is given. Choose it only when the person asks for faster answers and accepts the credits it uses. Another model returns to standard.'),
+  reasoning: z.enum(['default', ...ANSWER_EFFORTS]).optional().describe('How long the meeting\'s model thinks before each answer. default: the model\'s own, the quickest it answers well at; leave it unless the person asks. none, low, medium or high: more thinking weighs more before answering, and its first words come seconds later and use more credits. Choose medium or high only when the person asks for the model to think before it answers; a model without that level uses the nearest higher one it has.'),
 };
-const switchesOf = (input: { answers?: string; keepRecord?: boolean; limitUsd?: number | null; speed?: string }) => ({
+const switchesOf = (input: { answers?: string; keepRecord?: boolean; limitCredits?: number | null; speed?: string; reasoning?: string }) => ({
   ...(input.answers ? { answerMode: input.answers } : {}), ...(input.keepRecord !== undefined ? { saveHistory: input.keepRecord } : {}),
-  ...(input.limitUsd !== undefined ? { sessionLimitMicro: input.limitUsd === null ? NO_MEETING_LIMIT_MICRO : Math.round(input.limitUsd * 1e6) } : {}), ...(input.speed ? { serviceTier: input.speed } : {}),
+  ...(input.limitCredits !== undefined ? { sessionLimitMicro: input.limitCredits === null ? NO_MEETING_LIMIT_MICRO : costForCredits(input.limitCredits) } : {}), ...(input.speed ? { serviceTier: input.speed } : {}),
+  ...(input.reasoning ? { reasoningEffort: input.reasoning === 'default' ? null : input.reasoning } : {}),
 });
+/** A meeting's change; an earlier Prepped, which has no thinking setting, says so. */
+async function changeMeeting(client: Client, sessionId: string, change: Record<string, unknown>) {
+  try { return (await client.request('PATCH', `/api/sessions/${sessionId}`, { json: change })).session; }
+  catch (error) {
+    if ('reasoningEffort' in change && error instanceof PreppedError && error.status === 400 && /reasoningEffort/.test(error.message)) throw new PreppedError('This Prepped has no setting for how long the model thinks before answering. Update Prepped to set reasoning, or leave it out.', error.status, error.code);
+    throw error;
+  }
+}
+
+/** A request an older Prepped does not take: its agent tokens do not reach the route, or it has no such route. */
+const olderService = (error: unknown) => error instanceof PreppedError && ((error.status === 403 && error.code === 'AGENT_NOT_ALLOWED') || (error.status === 404 && error.message === 'API route not found.'));
+// This computer's choice to read a meeting's shared screen from its start (server/screen-reading.ts readsAtStart).
+const readScreen = z.boolean().describe('Whether the desktop app on this computer starts reading the shared screen when the meeting starts, as the meeting page\'s "Read the shared screen when this meeting starts": for a coding interview or a meeting where the person works on a project in a web editor with an AI agent, or a demo of code. A presentation with slides follows them on screen anyway (talk_follow). Each frame is read with the provider\'s low-cost vision model within the meeting\'s limit. The choice belongs to this computer: a meeting run on another computer follows that computer\'s choice. Give it only when the person asks for the screen to be read or the meeting plainly needs it.');
+async function setReadScreen(client: Client, sessionId: string, on: boolean): Promise<boolean | null> {
+  try {
+    return (await client.request('PUT', `/api/sessions/${sessionId}/screen-reading`, { json: { atStart: on } })).atStart;
+  } catch (error) {
+    if (olderService(error)) throw new PreppedError('This Prepped sets screen reading only on the meeting\'s page in the app. Update Prepped, or tell the person to turn on "Read the shared screen when this meeting starts" there.', (error as PreppedError).status, (error as PreppedError).code);
+    throw error;
+  }
+}
+/** This computer's choice, or null where Prepped keeps none (the web, or an earlier desktop app). */
+async function readsScreenAtStart(client: Client, sessionId: string): Promise<boolean | null> {
+  try { return (await client.request('GET', `/api/sessions/${sessionId}/screen-reading`)).atStart; }
+  catch (error) { if (olderService(error)) return null; throw error; }
+}
 
 const MATERIAL_TYPES = ['.pdf', '.docx', '.pptx', '.txt', '.md', ...dataExtensions.map(extension => '.' + extension)];
 // A presentation's deck (server/talk-deck.ts), and its draft script as a file.
@@ -116,7 +145,7 @@ const groupMemory = z.boolean().describe('Whether the group\'s meetings keep a s
 // The first (groups_create) or next (groups_update) meeting of a series takes these, and each meeting after it carries
 // them on (server/series.ts).
 const seriesMeeting = { purpose: purpose.optional(), participants: participants.optional(), instructions: instructions.optional(), language: answerLanguage.optional(), ...meetingSwitches };
-type SeriesMeetingInput = { purpose?: string; participants?: string[]; instructions?: string; language?: string; answers?: string; keepRecord?: boolean; limitUsd?: number | null; speed?: string };
+type SeriesMeetingInput = { purpose?: string; participants?: string[]; instructions?: string; language?: string; answers?: string; keepRecord?: boolean; limitCredits?: number | null; speed?: string; reasoning?: string };
 const seriesMeetingChange = (input: SeriesMeetingInput) => ({ ...(input.purpose ? { purpose: input.purpose } : {}), ...(input.participants ? { participants: input.participants } : {}),
   ...(input.instructions !== undefined ? { instructions: input.instructions } : {}), ...(input.language ? { language: input.language } : {}), ...switchesOf(input) });
 export function repeatRule(input: RepeatInput, context: Context) {
@@ -187,11 +216,12 @@ function ownerOf(input: { meeting?: string; group?: string }): string {
 }
 
 // What an agent sees of a meeting: what meetings_create and meetings_update set, under the names they take (type, start,
-// group, answers, keepRecord, limitUsd, speed), so it reads back what it set. A meeting without a spending limit of its
-// own (shared/meeting-limit.ts) has limitUsd null.
-const meetingOut = ({ mode, scheduledAt, groupId, answerMode, saveHistory, sessionLimitMicro, serviceTier, costMicro, costCredits: _credits, sessionLimitCredits: _limitCredits, ...session }: any) => ({
+// group, answers, keepRecord, limitCredits, speed, reasoning), so it reads back what it set, and the credits it used. A
+// meeting without a credit limit of its own (shared/meeting-limit.ts) has limitCredits null; one without its own
+// thinking choice, also from an earlier Prepped that has none, has reasoning default.
+const meetingOut = ({ mode, scheduledAt, groupId, answerMode, saveHistory, sessionLimitMicro, serviceTier, reasoningEffort, costMicro, costCredits: _credits, sessionLimitCredits: _limitCredits, ...session }: any) => ({
   ...session, type: mode, start: scheduledAt, group: groupId, answers: answerMode, keepRecord: saveHistory,
-  limitUsd: hasMeetingLimit(sessionLimitMicro) ? sessionLimitMicro / 1e6 : null, speed: serviceTier, costUsd: costMicro / 1e6 });
+  limitCredits: hasMeetingLimit(sessionLimitMicro) ? creditsForCost(sessionLimitMicro) : null, speed: serviceTier, reasoning: reasoningEffort ?? 'default', creditsUsed: creditsForCost(costMicro) });
 const meetingBrief = (session: any) => ({ id: session.id, title: session.title, type: session.mode, status: session.status, start: session.scheduledAt,
   group: session.groupId, purpose: session.purpose, participants: session.participants, model: session.model, ...(session.calendar ? { calendar: session.calendar } : {}), updatedAt: session.updatedAt });
 // A group's repeat rule (server/series.ts) as groups_create and groups_update take it.
@@ -202,7 +232,7 @@ function repeatOut(rule: { frequency: 'weekly' | 'monthly'; interval: number; we
 }
 // What an agent sees of a group: its type, its repeat rule and whether its meetings keep a shared memory, under the names
 // groups_create and groups_update take.
-const groupOut = ({ mode, recurrence, memoryEnabled, costMicro, ...group }: any) => ({ ...group, type: mode, ...repeatOut(recurrence), memory: memoryEnabled, costUsd: costMicro / 1e6 });
+const groupOut = ({ mode, recurrence, memoryEnabled, costMicro, ...group }: any) => ({ ...group, type: mode, ...repeatOut(recurrence), memory: memoryEnabled, creditsUsed: creditsForCost(costMicro) });
 // An interview group is a job target (server/job-target.ts): its stage and posting, its rounds in time order, the job's
 // requirements with the evidence quoted from the person's material, the person's stories, and what the rounds showed.
 const jobInput = {
@@ -219,6 +249,18 @@ const jobOut = (detail: any) => ({
   insights: (detail.target.insights as any[]).filter(item => !item.done).map(item => ({ kind: item.kind, content: item.content })),
 });
 const jobChange = (input: { stage?: string; postingUrl?: string | null; location?: string }) => ({ ...(input.stage ? { stage: input.stage } : {}), ...(input.postingUrl !== undefined ? { postingUrl: input.postingUrl } : {}), ...(input.location !== undefined ? { location: input.location } : {}) });
+// What an agent sees of a project (server/knowledge.ts): its state, size, repository and brief. A copy of a repository
+// that another project of the same meeting or group is read in place of (sameAs) is neither downloaded nor read: its
+// status is copy. The overview and the AI coding tools' memory files run to a hundred thousand characters for a large
+// project, so they come as their sizes and paths unless `full` asks for their text (projects_get).
+const projectOut = (project: any, full = false) => {
+  const { status, overview, codingMemory, ...rest } = project;
+  return { ...rest, status: project.sameAs ? 'copy' : status,
+    ...(overview === undefined ? {} : full ? { overview } : { overviewCharacters: String(overview).length }),
+    ...(codingMemory === undefined ? {} : { codingMemory: full ? codingMemory
+      : (codingMemory as any[]).map(file => ({ path: file.path, tools: file.toolNames ?? file.tools, characters: file.chars, truncated: file.truncated })) }) };
+};
+const projectListOut = (list: any) => ({ ...list, projects: (list.projects as any[]).map(project => projectOut(project)), groupProjects: (list.groupProjects as any[] | undefined)?.map(project => projectOut(project)) });
 const documentOut = (document: any) => ({ id: document.id, name: document.name, characters: document.characters, groupId: document.groupId ?? null, origin: document.origin ?? null, createdAt: document.createdAt });
 
 // What the agent passes on to the person with a result, in `tellThePerson` (the MCP instructions and SKILL.md ask it
@@ -237,12 +279,24 @@ async function preparation(client: Client, sessionId: string | null | undefined)
   const { service } = await client.request('GET', '/api/agent/me') as { service: { mode: 'local' | 'hosted' } };
   return { tellThePerson: [service.mode === 'local' ? PREPARED_HERE : PREPARED_ONLINE] };
 }
-/** A group's next planned meeting, which its material and projects are prepared for. */
-async function nextPlanned(client: Client, groupId: string): Promise<string | null> {
-  const { sessions } = await client.request('GET', `/api/groups/${groupId}`) as { sessions: { id: string; status: string; scheduledAt: string | null }[] };
-  return sessions.filter(session => session.status === 'planned').sort((a, b) => (a.scheduledAt ?? '9999').localeCompare(b.scheduledAt ?? '9999'))[0]?.id ?? null;
+type GroupMeeting = { id: string; status: string; scheduledAt: string | null };
+/**
+ * A group's next meeting: its earliest planned meeting whose time is not over (its series' length, an hour without
+ * one), else one planned without a time. A planned meeting whose time is over was not held; the series moves it to its
+ * next time (server/series.ts).
+ */
+export function nextOfGroup<T extends GroupMeeting>(sessions: T[], recurrence: { minutes: number } | null | undefined, now: Date): T | null {
+  const length = (recurrence?.minutes ?? 60) * 60_000;
+  const planned = sessions.filter(session => session.status === 'planned');
+  return planned.filter(session => session.scheduledAt && Date.parse(session.scheduledAt) + length > now.getTime()).sort((a, b) => a.scheduledAt!.localeCompare(b.scheduledAt!))[0]
+    ?? planned.find(session => !session.scheduledAt) ?? null;
 }
-const preparationOf = async (client: Client, owner: { meeting?: string; group?: string }) => preparation(client, owner.meeting ?? await nextPlanned(client, owner.group!));
+/** A group's next meeting, which its material and projects are prepared for. */
+async function nextPlanned(client: Client, groupId: string, now: Date): Promise<string | null> {
+  const { group, sessions } = await client.request('GET', `/api/groups/${groupId}`) as { group: { recurrence: { minutes: number } | null }; sessions: GroupMeeting[] };
+  return nextOfGroup(sessions, group.recurrence, now)?.id ?? null;
+}
+const preparationOf = async (client: Client, owner: { meeting?: string; group?: string }, now: Date) => preparation(client, owner.meeting ?? await nextPlanned(client, owner.group!, now));
 
 /** Runs an operation; when it had to start the closed desktop app, the result tells the person so. */
 export async function perform(operation: Operation, context: Context, input: unknown): Promise<unknown> {
@@ -253,13 +307,19 @@ export async function perform(operation: Operation, context: Context, input: unk
   return { ...result as object, tellThePerson: [APP_STARTED, ...told] };
 }
 const prepOut = (prep: any) => prep && ({ status: prep.status, stale: prep.stale, model: prep.model, startedAt: prep.startedAt, finishedAt: prep.finishedAt, error: prep.error,
-  stopReason: prep.stopReason, costMicro: prep.costMicro, progress: prep.progress, topics: prep.topicCount });
+  stopReason: prep.stopReason, creditsUsed: creditsForCost(prep.costMicro), progress: prep.progress, topics: prep.topicCount });
+// What a preparation started now is expected to use (POST /api/sessions/:id/prep/estimate), in credits.
+const estimateOut = (estimate: any) => estimate && { credits: creditsForCost(estimate.costMicro), projectGuidesToWrite: estimate.projects, files: estimate.files, model: estimate.readingModel };
 // What an agent sees of a presentation's talk (server/talk.ts state): the outline with each section's slides, the deck's
 // slide titles, the draft script (its start, or all of it for talk_get), whether the desktop app follows the slides, and
-// what is written to say.
-const talkOut = (talk: any, fullScript = false) => ({
+// what is written to say. With `said`, each section written also has what to say in it: its beats (the slide, the key
+// words, the sentences, and whether it can be left out when the talk runs late), the line leading into the next
+// section, and the questions it may raise with their answers.
+const talkOut = (talk: any, fullScript = false, said = false) => ({
   outline: (talk.outline.sections as any[]).map(section => ({ id: section.id, title: section.title, points: section.points ? String(section.points).split('\n') : [], minutes: section.minutes,
-    fromSlide: section.slides?.from ?? null, toSlide: section.slides?.to ?? null, presenter: section.presenter ?? null, written: Boolean(talk.content[section.id]), outdated: Boolean(talk.content[section.id]?.stale) })),
+    fromSlide: section.slides?.from ?? null, toSlide: section.slides?.to ?? null, presenter: section.presenter ?? null, written: Boolean(talk.content[section.id]), outdated: Boolean(talk.content[section.id]?.stale),
+    ...(said && talk.content[section.id] ? { say: (talk.content[section.id].beats as any[]).map(beat => ({ slide: beat.slide, cue: beat.cue, say: beat.say, canLeaveOut: beat.optional })),
+      transition: talk.content[section.id].transition, questions: talk.content[section.id].questions } : {}) })),
   deck: talk.deck && { name: talk.deck.name, kind: talk.deck.kind, slides: (talk.deck.slides as any[]).map(slide => `${slide.number}. ${slide.title}`) },
   script: fullScript ? { characters: talk.script.length, text: talk.script } : { characters: talk.script.length, start: talk.script.slice(0, 400) }, followSlides: talk.follow,
   writing: talk.writing, writeError: talk.error, live: talk.view && { slide: talk.view.slide, now: talk.view.now, section: talk.view.sections[talk.view.current]?.title ?? null },
@@ -337,9 +397,9 @@ export const OPERATIONS: Operation[] = [
   }),
   operation({
     name: 'settings_update', title: 'Turn switches', effect: 'write',
-    description: 'Turns the switches given and leaves the others. The device ones change the desktop app on this computer at once, as its Settings do: translation needs online speech recognition and a language (into); local recognition needs its speech model on this computer. The translation adds about 0.50 to 1.20 USD an hour of speech to the account\'s charges. To have a meeting translated on whichever computer runs it, set translateInto in its setup (meetings_create, meetings_update) or its group\'s: "auto" for the app\'s interface language.',
+    description: 'Turns the switches given and leaves the others. The device ones change the desktop app on this computer at once, as its Settings do: translation needs online speech recognition and a language (into); local recognition needs its speech model on this computer. The translation uses about 50 to 120 credits an hour of speech. To have a meeting translated on whichever computer runs it, set translateInto in its setup (meetings_create, meetings_update) or its group\'s: "auto" for the app\'s interface language.',
     input: {
-      autoPrepare: z.boolean().optional().describe('Prepare planned meetings with material by themselves'),
+      autoPrepare: z.boolean().optional().describe('Prepare planned meetings with material by themselves; turning it on spends credits on those preparations and needs the paid permission'),
       searchForOtherComputers: z.boolean().optional().describe('Allow other computers of this account to search this computer’s project folders and preparation while it is online. Defaults to true.'),
       overlay: appearanceChange.optional().describe('Appearance on this desktop: style (prepped, or the look of a sticky-note app: mac-stickies, windows-sticky-notes, xiaohuangtiao, zhorn-stickies, notezilla; colors and glass apply to the prepped style), layout (answer or list), glass, size, colors, opacity (0.20–1 in steps of 0.05), and color preset. Text must have at least 4.5:1 contrast.'),
       quickActions: quickActionsChange.optional().describe('Account-wide ordered overlay actions by meeting type. Supply 1–8 action IDs, or null to restore that type’s defaults.'),
@@ -371,7 +431,7 @@ export const OPERATIONS: Operation[] = [
   // Meetings
   operation({
     name: 'meetings_computers', title: 'Show or change the computers in a meeting', effect: 'write', positional: 'meeting',
-    description: 'Get each signed-in computer’s online, open, listening and answering state. For a live meeting, update one role on one online desktop when the person asks. Open it before starting its listening or handing it the answering. Several computers can listen, and only one answers. Move the answering before closing that computer. The returned list reflects the room’s confirmed state.',
+    description: 'Get each signed-in computer’s online, open, listening and answering state. For a live meeting, update one role on one online desktop when the person asks. Open it before starting its listening or handing it the answering. Several computers can listen, and only one answers. Move the answering before closing that computer. Starting a computer\'s listening or answering spends credits and needs the paid permission. The returned list reflects the room’s confirmed state.',
     input: { meeting: uuid('meeting'), action: z.enum(['get', 'update']).default('get'), computer: z.string().min(1).max(80).optional().describe('Desktop ID from get'),
       open: z.boolean().optional(), listening: z.boolean().optional(), answering: z.boolean().optional().describe('True hands the answering to this open desktop') },
     async run(context, { meeting, action, computer, ...role }) {
@@ -399,18 +459,18 @@ export const OPERATIONS: Operation[] = [
   }),
   operation({
     name: 'meetings_get', title: 'Show a meeting', effect: 'read', positional: 'meeting',
-    description: 'A meeting in full, with everything meetings_create and meetings_update set under the names they take (type, start, group, setup, purpose, participants, instructions, model, language, answers, keepRecord, limitUsd, speed), its documents (material_get reads one), its projects with their indexing state, its calendar event, its preparation and its rehearsals.',
+    description: 'A meeting in full, with everything meetings_create and meetings_update set under the names they take (type, start, group, setup, purpose, participants, instructions, model, language, answers, keepRecord, limitCredits, speed, reasoning, and readScreen: this computer\'s choice, null where Prepped keeps none) and the credits it used, its documents (material_get reads one), its projects with their indexing state, its calendar event, its preparation and its rehearsals.',
     input: { meeting: uuid('meeting') },
     async run(context, input) {
       const client = await context.client();
       const detail = await client.request('GET', `/api/sessions/${input.meeting}`);
       const { prep } = await client.request('GET', `/api/sessions/${input.meeting}/prep`);
-      const projects = await client.request('GET', `/api/sessions/${input.meeting}/projects`);
+      const projects = projectListOut(await client.request('GET', `/api/sessions/${input.meeting}/projects`));
       // Its rehearsals (server/rehearsals.ts): each held in the app beforehand, apart from the meeting.
       const rehearsals = detail.session.rehearsalOf ? [] : (await client.request('GET', `/api/sessions/${input.meeting}/rehearsals`)).rehearsals as any[];
-      return { meeting: meetingOut(detail.session), documents: detail.documents.map(documentOut), projects: projects.projects, groupProjects: projects.groupProjects, projectsElsewhere: projects.elsewhere ?? null,
+      return { meeting: { ...meetingOut(detail.session), readScreen: await readsScreenAtStart(client, input.meeting) }, documents: detail.documents.map(documentOut), projects: projects.projects, groupProjects: projects.groupProjects, projectsElsewhere: projects.elsewhere ?? null,
         calendarEvent: detail.calendarEvent, preparation: prepOut(prep), transcriptPieces: detail.transcripts.length, messages: detail.messages.length,
-        rehearsals: rehearsals.map(item => ({ id: item.id, status: item.status, startedAt: item.startedAt, endedAt: item.endedAt, durationSeconds: item.durationSeconds, costMicro: item.costMicro })) };
+        rehearsals: rehearsals.map(item => ({ id: item.id, status: item.status, startedAt: item.startedAt, endedAt: item.endedAt, durationSeconds: item.durationSeconds, creditsUsed: creditsForCost(item.costMicro) })) };
     },
   }),
   operation({
@@ -433,38 +493,48 @@ export const OPERATIONS: Operation[] = [
   }),
   operation({
     name: 'meetings_create', title: 'Create a meeting', effect: 'write',
-    description: 'Creates a planned meeting with its type, time, purpose, participants, setup fields, instructions, switches (when to answer, keeping its record, its spending limit, the provider\'s speed) and material (up to 8 documents; a folder of more goes in with projects_add). In a group, it starts from the group\'s setup. Choose each option from the person\'s words and files, leave the others to their defaults, and afterwards tell the person each choice and why; a meeting in their calendar is made with calendar_setup instead.',
+    description: 'Creates a planned meeting with its type, time, purpose, participants, setup fields, instructions, switches (when to answer, keeping its record, its spending limit, the provider\'s speed, how long the model thinks before answering, whether this computer reads the shared screen from its start) and material (up to 8 documents; a folder of more goes in with projects_add). In a group, it starts from the group\'s setup. A repeating group makes its meetings itself: its next one is groups_get nextMeeting (a meeting of it that was not held moves on to the next time), so change that one with meetings_update; a second meeting of the group on the same day is refused. Choose each option from the person\'s words and files, leave the others to their defaults, and afterwards tell the person each choice and why; a meeting in their calendar is made with calendar_setup instead.',
     input: { title: z.string().min(1).max(120), type: type.optional(), start: start.optional(), timeZone: timeZone.optional(), purpose: purpose.optional(),
-      participants: participants.optional(), instructions: instructions.optional(), setup: setup.optional(), group: uuid('group').optional().describe('Put the meeting in this session group'),
-      model: model.optional(), language: answerLanguage.optional(), ...meetingSwitches, ...materialInput },
+      participants: participants.optional(), instructions: instructions.optional(), setup: setup.optional(), group: uuid('group').optional().describe('Put the meeting in this session group. A repeating group makes its meetings itself: prepare its next meeting (groups_get nextMeeting) with meetings_update rather than creating another.'),
+      model: model.optional(), language: answerLanguage.optional(), ...meetingSwitches, readScreen: readScreen.optional(), ...materialInput },
     async run(context, input) {
       const material = await readMaterial(context, input);
       roomFor(0, material);
       const client = await context.client();
       // In a group of the same type, the given fields go over the group's setup, as the app's form starts from it.
-      const group = input.group ? (await client.request('GET', `/api/groups/${input.group}`)).group as { mode: SessionMode; setup: Record<string, unknown> } : undefined;
+      const found = input.group ? await client.request('GET', `/api/groups/${input.group}`) as { group: { mode: SessionMode; setup: Record<string, unknown>; recurrence: { timeZone: string } | null; followsCalendar?: boolean }; sessions: (GroupMeeting & { title: string })[] } : undefined;
+      const group = found?.group;
+      const scheduledAt = input.start ? instant(input.start, zoneOf(context, input.timeZone)) : null;
+      // A repeating group's meeting on that day is the one to prepare: its series made it, or will move the one not held.
+      if (found && scheduledAt && (group!.recurrence || group!.followsCalendar)) {
+        const zone = group!.recurrence?.timeZone ?? zoneOf(context, input.timeZone);
+        const same = found.sessions.find(session => session.status === 'planned' && session.scheduledAt && dateIn(new Date(session.scheduledAt), zone) === dateIn(new Date(scheduledAt), zone));
+        if (same) throw new PreppedError(`The group repeats and already has its meeting on ${dateIn(new Date(scheduledAt), zone)}: "${same.title}" (${same.id}). Change that meeting with meetings_update instead of creating another.`, 409, 'SERIES_MEETING_EXISTS');
+      }
       const mode = input.type ?? group?.mode ?? 'general';
       const meetingSetup = input.setup && (group?.mode === mode ? mergedSetup(group, mode, input.setup) : await withNewestResume(client, { ...input.setup, mode }));
       const { session } = await client.request('POST', '/api/sessions', { json: {
-        title: input.title, mode, ...(input.start ? { scheduledAt: instant(input.start, zoneOf(context, input.timeZone)) } : {}), ...(input.purpose ? { purpose: input.purpose } : {}),
+        title: input.title, mode, ...(scheduledAt ? { scheduledAt } : {}), ...(input.purpose ? { purpose: input.purpose } : {}),
         ...(input.participants ? { participants: input.participants } : {}), ...(input.group ? { groupId: input.group } : {}), ...(input.model ? { model: input.model } : {}),
         ...(input.language ? { language: input.language } : {}), ...(meetingSetup ? { setup: meetingSetup } : {}),
       } });
       const later = { ...(input.instructions ? { instructions: input.instructions } : {}), ...switchesOf(input) };
-      const meeting = Object.keys(later).length ? (await client.request('PATCH', `/api/sessions/${session.id}`, { json: later })).session : session;
+      const meeting = Object.keys(later).length ? await changeMeeting(client, session.id, later) : session;
+      const screen = input.readScreen === undefined ? {} : { readScreen: await setReadScreen(client, session.id, input.readScreen) };
       const documents = (await attach(client, `/api/sessions/${session.id}`, material)).map(documentOut);
-      return { meeting: meetingOut(meeting), documents, ...await preparation(client, session.id) };
+      return { meeting: { ...meetingOut(meeting), ...screen }, documents, ...await preparation(client, session.id) };
     },
   }),
   operation({
     name: 'meetings_update', title: 'Change a meeting', effect: 'write', positional: 'meeting',
-    description: 'Changes a meeting\'s title, type, time, purpose, participants, instructions, setup fields (only those given; responseStyle fields go over the saved ones), group, model, language or switches (when to answer, keeping its record, its spending limit, the provider\'s speed). start null removes its time; group null takes it out of its group. Change what the person asks for and what their new words or files show, by the same rules as meetings_create, and tell them what changed.',
+    description: 'Changes a meeting\'s title, type, time, purpose, participants, instructions, setup fields (only those given; responseStyle fields go over the saved ones), group, model, language or switches (when to answer, keeping its record, its spending limit, the provider\'s speed, how long the model thinks before answering, whether this computer reads the shared screen from its start). start null removes its time; group puts it in a group (a meeting made apart joins its series this way), null takes it out. Change what the person asks for and what their new words or files show, by the same rules as meetings_create, and tell them what changed.',
     input: { meeting: uuid('meeting'), title: z.string().min(1).max(120).optional(), type: type.optional(), start: start.nullable().optional(), timeZone: timeZone.optional(),
       purpose: purpose.optional(), participants: participants.optional(), instructions: instructions.optional(), setup: setup.optional(),
-      group: uuid('group').nullable().optional(), model: model.optional(), language: answerLanguage.optional(), ...meetingSwitches },
+      group: uuid('group').nullable().optional(), model: model.optional(), language: answerLanguage.optional(), ...meetingSwitches, readScreen: readScreen.optional() },
     async run(context, input) {
       const client = await context.client();
       const { session } = await client.request('GET', `/api/sessions/${input.meeting}`);
+      const screen = input.readScreen === undefined ? {} : { readScreen: await setReadScreen(client, input.meeting, input.readScreen) };
       const mode = input.type ?? session.mode;
       const change = {
         ...(input.title !== undefined ? { title: input.title } : {}), ...(input.type ? { mode } : {}),
@@ -474,7 +544,8 @@ export const OPERATIONS: Operation[] = [
         ...(input.model ? { model: input.model } : {}), ...(input.language ? { language: input.language } : {}),
         ...(input.setup ? { setup: mergedSetup(session, mode, input.setup) } : {}), ...switchesOf(input),
       };
-      return { meeting: meetingOut((await client.request('PATCH', `/api/sessions/${input.meeting}`, { json: change })).session), ...await preparation(client, input.meeting) };
+      const changed = Object.keys(change).length ? await changeMeeting(client, input.meeting, change) : session;
+      return { meeting: { ...meetingOut(changed), ...screen }, ...await preparation(client, input.meeting) };
     },
   }),
   operation({
@@ -509,7 +580,7 @@ export const OPERATIONS: Operation[] = [
   }),
   operation({
     name: 'groups_get', title: 'Show a session group', effect: 'read', positional: 'group',
-    description: 'A group in full, with everything groups_create and groups_update set under the names they take: its name, type and setup, its repeat rule and the start times of its next meetings, its shared memory (on or off, and what it holds: decisions, action items, progress, facts and terms from earlier meetings), its documents (material_get reads one) and projects, its meetings, and its next planned meeting in full (where purpose, participants and instructions carry on). An interview group also has its job target: the stage, the posting, its rounds and the next one, the job\'s requirements with the evidence quoted from the person\'s resume, projects and answers (strong, weak or none, and what to prepare for a gap), the person\'s stories, and what earlier rounds showed.',
+    description: 'A group in full, with everything groups_create and groups_update set under the names they take: its name, type and setup, its repeat rule and the start times of its next meetings, its shared memory (on or off, and what it holds: decisions, action items, progress, facts and terms from earlier meetings), its documents (material_get reads one) and projects, its meetings, and its next meeting in full (nextMeeting: the earliest planned meeting whose time is not over, where purpose, participants and instructions carry on; prepare that meeting for the coming date rather than creating another). An interview group also has its job target: the stage, the posting, its rounds and the next one, the job\'s requirements with the evidence quoted from the person\'s resume, projects and answers (strong, weak or none, and what to prepare for a gap), the person\'s stories, and what earlier rounds showed.',
     input: { group: uuid('group') },
     async run(context, input) {
       const client = await context.client();
@@ -517,9 +588,9 @@ export const OPERATIONS: Operation[] = [
       const schedule = await client.request('GET', `/api/groups/${input.group}/schedule`);
       const memory = await client.request('GET', `/api/groups/${input.group}/memory`);
       const { projects } = await client.request('GET', `/api/groups/${input.group}/projects`);
-      const planned = (detail.sessions as any[]).filter(session => session.status === 'planned').sort((a, b) => (a.scheduledAt ?? '9999').localeCompare(b.scheduledAt ?? '9999'))[0];
+      const planned = nextOfGroup(detail.sessions as any[], detail.group.recurrence, context.now());
       const job = detail.group.mode === 'interview' ? jobOut(await client.request('GET', `/api/job-targets/${input.group}`)) : undefined;
-      return { group: groupOut(detail.group), schedule, memoryEntries: memory.entries, documents: (detail.documents as any[]).map(documentOut), projects,
+      return { group: groupOut(detail.group), schedule, memoryEntries: memory.entries, documents: (detail.documents as any[]).map(documentOut), projects: (projects as any[]).map(project => projectOut(project)),
         meetings: (detail.sessions as any[]).map(meetingBrief), nextMeeting: planned ? meetingOut(planned) : null, ...(job ? { jobTarget: job } : {}) };
     },
   }),
@@ -543,7 +614,7 @@ export const OPERATIONS: Operation[] = [
         const schedule = rule ? await client.request('PUT', `/api/groups/${group.id}/recurrence`, { json: { recurrence: rule } }) : null;
         let firstMeeting = null;
         if (schedule?.made) {
-          firstMeeting = Object.keys(meetingChange).length ? (await client.request('PATCH', `/api/sessions/${schedule.made}`, { json: meetingChange })).session
+          firstMeeting = Object.keys(meetingChange).length ? await changeMeeting(client, schedule.made, meetingChange)
             : (await client.request('GET', `/api/sessions/${schedule.made}`)).session;
         }
         const documents = await attach(client, `/api/groups/${group.id}`, material);
@@ -576,13 +647,13 @@ export const OPERATIONS: Operation[] = [
       const meetingChange = seriesMeetingChange(input);
       let nextMeeting = null;
       if (Object.keys(meetingChange).length) {
-        const current = (await client.request('GET', `/api/groups/${input.group}`)).sessions as any[];
-        const planned = current.filter(session => session.status === 'planned').sort((a, b) => (a.scheduledAt ?? '9999').localeCompare(b.scheduledAt ?? '9999'))[0];
-        if (!planned) throw new PreppedError(`The group has no planned meeting to change (it has ${sessions.length} meetings). Set a repeat rule, or create one with meetings_create and group.`);
-        nextMeeting = meetingOut((await client.request('PATCH', `/api/sessions/${planned.id}`, { json: meetingChange })).session);
+        const current = await client.request('GET', `/api/groups/${input.group}`);
+        const planned = nextOfGroup(current.sessions as any[], current.group.recurrence, context.now());
+        if (!planned) throw new PreppedError(`The group has no meeting to come to change (it has ${sessions.length} meetings; a planned one whose time is over was not held and moves with the repeat rule). Set a repeat rule, or create one with meetings_create and group.`);
+        nextMeeting = meetingOut(await changeMeeting(client, planned.id, meetingChange));
       }
       return { group: groupOut((await client.request('GET', `/api/groups/${input.group}`)).group), schedule: schedule && { recurrence: schedule.recurrence, next: schedule.next, made: schedule.made }, nextMeeting,
-        ...(job ? { jobTarget: job } : {}), ...await preparationOf(client, { group: input.group }) };
+        ...(job ? { jobTarget: job } : {}), ...await preparationOf(client, { group: input.group }, context.now()) };
     },
   }),
   operation({
@@ -606,7 +677,7 @@ export const OPERATIONS: Operation[] = [
       const { documents } = await client.request('GET', owner);
       roomFor((documents as { groupId: string | null }[]).filter(document => input.group || !document.groupId).length, material);
       const added = (await attach(client, owner, material)).map(documentOut);
-      return { documents: added, ...await preparationOf(client, input) };
+      return { documents: added, ...await preparationOf(client, input, context.now()) };
     },
   }),
   operation({
@@ -626,23 +697,31 @@ export const OPERATIONS: Operation[] = [
   }),
   operation({
     name: 'projects_list', title: 'List project folders and repositories', effect: 'read',
-    description: 'The project folders and code repositories of a meeting or a group, with their indexing state (indexing, ready, error) and file counts. For a meeting prepared on another computer, elsewhere says what of its projects differs on this one: folders that stay on that computer (missing), repositories at another commit or with changes not committed (changed), and projects not indexed here (unready); live answers here search only this computer\'s copy. Null when nothing differs.',
+    description: 'The project folders and code repositories of a meeting or a group, with their indexing state (indexing, ready, error, or copy: another project of the meeting or group is the same repository and is read in its place, named by sameAs) and file counts. For a meeting prepared on another computer, elsewhere says what of its projects differs on this one: folders that stay on that computer (missing), repositories at another commit or with changes not committed (changed), and projects not indexed here (unready); live answers here search only this computer\'s copy. Null when nothing differs.',
     input: { meeting: uuid('meeting').optional(), group: uuid('group').optional() },
-    async run(context, input) { return (await context.client()).request('GET', `${ownerOf(input)}/projects`); },
+    async run(context, input) { return projectListOut(await (await context.client()).request('GET', `${ownerOf(input)}/projects`)); },
   }),
   operation({
     name: 'projects_get', title: 'Show a project', effect: 'read', positional: 'project',
-    description: 'A project folder or repository in full: its indexing state and size (truncated: it holds more files than Prepped indexes), its brief (the person\'s own explanation, which answers and preparation read first), its overview, and the AI coding tools whose memory files it is read with.',
-    input: { project: uuid('project') },
-    async run(context, input) { return (await context.client()).request('GET', `/api/knowledge/projects/${input.project}`); },
+    description: 'A project folder or repository: its indexing state and size (truncated: it holds more files than Prepped indexes; status copy: another project of its meeting or group is the same repository and is read in its place), its brief (the person\'s own explanation, which answers and preparation read first), the AI coding tools whose memory it is read with (codingTools: detected, and chosen or null when Prepped follows the detected ones), and its memory files and overview by size. full true adds the overview\'s text and each memory file\'s text, which can run to a hundred thousand characters.',
+    input: { project: uuid('project'), full: z.boolean().optional().describe('Include the overview and the memory files\' text (default false)') },
+    async run(context, input) { return { project: projectOut((await (await context.client()).request('GET', `/api/knowledge/projects/${input.project}`)).project, input.full) }; },
   }),
   operation({
-    name: 'projects_update', title: 'Rename a project or write its brief', effect: 'write', positional: 'project',
-    description: 'Changes a project\'s name, or its brief: what the project is and what matters in it, in the person\'s words, which answers and preparation read before its files. An empty brief removes it.',
-    input: { project: uuid('project'), name: z.string().trim().min(1).max(80).optional(), brief: z.string().max(TEXT_LIMITS.brief).optional() },
+    name: 'projects_update', title: 'Rename a project, write its brief or choose its coding tools', effect: 'write', positional: 'project',
+    description: 'Changes a project\'s name; its brief: what the project is and what matters in it, in the person\'s words, which answers and preparation read before its files (an empty brief removes it); or codingTools: the AI coding tools (Claude Code, Codex, Cursor, …) whose instructions, memory and session records Prepped reads with the project. [] reads none of them, null returns to the tools its files and this computer show; give tool ids such as ["claude-code"] to read only those. Change codingTools only when the person asks to leave the tools\' memory or session records out (or in).',
+    input: { project: uuid('project'), name: z.string().trim().min(1).max(80).optional(), brief: z.string().max(TEXT_LIMITS.brief).optional(),
+      codingTools: z.array(z.string().min(1).max(40)).max(60).nullable().optional().describe('Tool ids (codingTools.detected of projects_get shows those found), [] for none, null for the detected ones') },
     async run(context, input) {
-      if (input.name === undefined && input.brief === undefined) throw new PreppedError('Give name or brief.');
-      return (await context.client()).request('PATCH', `/api/knowledge/projects/${input.project}`, { json: { ...(input.name !== undefined ? { name: input.name } : {}), ...(input.brief !== undefined ? { brief: input.brief } : {}) } });
+      if (input.name === undefined && input.brief === undefined && input.codingTools === undefined) throw new PreppedError('Give name, brief or codingTools.');
+      const client = await context.client();
+      let project = null;
+      if (input.name !== undefined || input.brief !== undefined) project = (await client.request('PATCH', `/api/knowledge/projects/${input.project}`, { json: { ...(input.name !== undefined ? { name: input.name } : {}), ...(input.brief !== undefined ? { brief: input.brief } : {}) } })).project;
+      if (input.codingTools !== undefined) {
+        try { project = (await client.request('PUT', `/api/knowledge/projects/${input.project}/coding-tools`, { json: { tools: input.codingTools } })).project; }
+        catch (error) { if (olderService(error)) throw new PreppedError('This Prepped chooses a project\'s coding tools only on its page in the app. Update Prepped to choose them here.', (error as PreppedError).status, (error as PreppedError).code); throw error; }
+      }
+      return { project: projectOut(project) };
     },
   }),
   operation({
@@ -660,7 +739,7 @@ export const OPERATIONS: Operation[] = [
       const added = input.folder ? await client.request('POST', `${owner}/projects`, { json: { path: path.resolve(context.cwd, input.folder), ...(input.name ? { name: input.name } : {}) } })
         : input.github ? await client.request('POST', `${owner}/projects/github`, { json: { repository: input.github, ...(input.ref ? { ref: input.ref } : {}) } })
         : await client.request('POST', `${owner}/projects/git`, { json: { address: input.git, ...(input.ref ? { ref: input.ref } : {}) } });
-      return { ...added, ...await preparationOf(client, input) };
+      return { project: projectOut(added.project), ...await preparationOf(client, input, context.now()) };
     },
   }),
   operation({
@@ -671,15 +750,15 @@ export const OPERATIONS: Operation[] = [
   }),
   operation({
     name: 'projects_reindex', title: 'Index a project again', effect: 'write', positional: 'project',
-    description: 'Reads a project folder again after its files changed, or downloads a repository\'s newest commit.',
+    description: 'Reads a project folder again after its files changed, or downloads a repository\'s newest commit. It returns at once with status indexing and the previous indexedAt; projects_get shows when it is ready (a new indexedAt).',
     input: { project: uuid('project') },
-    async run(context, input) { return (await context.client()).request('POST', `/api/knowledge/projects/${input.project}/reindex`); },
+    async run(context, input) { return { project: projectOut((await (await context.client()).request('POST', `/api/knowledge/projects/${input.project}/reindex`)).project) }; },
   }),
 
   // Preparation
   operation({
     name: 'prep_status', title: 'Preparation state', effect: 'read', positional: 'meeting',
-    description: 'Whether a meeting is prepared: the run\'s state and progress (project guides, topics with their facts, holding lines), its cost, what a run started now is expected to cost (estimate), and what automatic preparation will do.',
+    description: 'Whether a meeting is prepared: the run\'s state and progress (project guides, topics with their facts, holding lines), the credits it used, whether it is older than the material (stale), the credits a run started now is expected to use (estimate.credits), and what automatic preparation will do (automatic; state elsewhere: another computer of the account prepares it, named by preparedOn: the one with the meeting\'s project folders, else the one it was made on, which steps in when nothing started 15 minutes after the preparation was due).',
     input: { meeting: uuid('meeting') },
     async run(context, input) {
       const client = await context.client();
@@ -687,19 +766,19 @@ export const OPERATIONS: Operation[] = [
       const { auto } = await client.request('GET', `/api/sessions/${input.meeting}/auto-prep`);
       const { session } = await client.request('GET', `/api/sessions/${input.meeting}`);
       const { estimate } = session.rehearsalOf ? { estimate: null } : await client.request('POST', `/api/sessions/${input.meeting}/prep/estimate`, { json: { model: session.model } });
-      return { preparation: prepOut(prep), automatic: auto, estimate: estimate && { costUsd: estimate.costMicro / 1e6, projectGuidesToWrite: estimate.projects, files: estimate.files, model: estimate.readingModel }, ...await preparation(client, input.meeting) };
+      return { preparation: prepOut(prep), automatic: auto, estimate: estimateOut(estimate), ...await preparation(client, input.meeting) };
     },
   }),
   operation({
     name: 'prep_start', title: 'Prepare a meeting', effect: 'paid', positional: 'meeting',
-    description: 'Starts preparing a meeting: Prepped writes a guide to each of its projects, the topics the meeting is likely to raise with the facts of each and where each comes from, and lines to say while an answer is found; the answers during the meeting use them. Tell the person what it is expected to cost (prep_status estimate) and get their agreement first. Planned meetings with material are also prepared by themselves; check prep_status first. Returns at once; follow it with prep_status.',
+    description: 'Starts preparing a meeting: Prepped writes a guide to each of its projects, the topics the meeting is likely to raise with the facts of each and where each comes from, and lines to say while an answer is found; the answers during the meeting use them. Tell the person how many credits it is expected to use (prep_status estimate.credits) and get their agreement first. Planned meetings with material are also prepared by themselves; check prep_status first. Returns at once; follow it with prep_status.',
     input: { meeting: uuid('meeting'), model: model.optional().describe('Model whose provider prepares (default: the meeting\'s)') },
     async run(context, input) {
       const client = await context.client();
       const chosen = input.model ?? (await client.request('GET', `/api/sessions/${input.meeting}`)).session.model;
       const { estimate } = await client.request('POST', `/api/sessions/${input.meeting}/prep/estimate`, { json: { model: chosen } });
       const { prep } = await client.request('POST', `/api/sessions/${input.meeting}/prep`, { json: { model: chosen } });
-      return { preparation: prepOut(prep), estimate, ...await preparation(client, input.meeting) };
+      return { preparation: prepOut(prep), estimate: estimateOut(estimate), ...await preparation(client, input.meeting) };
     },
   }),
   operation({
@@ -713,9 +792,27 @@ export const OPERATIONS: Operation[] = [
   // say on each slide; during the talk the desktop app follows the slides on screen and says what to say on each one.
   operation({
     name: 'talk_get', title: 'Show a presentation\'s talk', effect: 'read', positional: 'meeting',
-    description: 'A presentation meeting\'s talk: its outline (sections with points, minutes and slides), the deck\'s slides, the whole draft script, whether the desktop app follows the slides on screen, and, while it is live, the slide on screen and what to say on it.',
-    input: { meeting: uuid('meeting') },
-    async run(context, input) { return talkOut((await (await context.client()).request('GET', `/api/sessions/${input.meeting}/talk`)).talk, true); },
+    description: 'A presentation meeting\'s talk: its outline (sections with points, minutes and slides, and whether what to say in each is written and still current), the deck\'s slides, the whole draft script, whether the desktop app follows the slides on screen, and, while it is live, the slide on screen and what to say on it. said true adds what is written to say in each section (talk_write writes it before the meeting) for you or the person to check.',
+    input: { meeting: uuid('meeting'), said: z.boolean().optional().describe('Include what is written to say in each section (default false)') },
+    async run(context, input) { return talkOut((await (await context.client()).request('GET', `/api/sessions/${input.meeting}/talk`)).talk, true, input.said); },
+  }),
+  operation({
+    name: 'talk_write', title: 'Write what to say before the talk', effect: 'paid', positional: 'meeting',
+    description: 'Writes now, before the meeting, what to say in each of the person\'s sections of a presentation, as activating the meeting would: from the outline, the slides, the draft script and the material, with the meeting\'s model. The person can then read and check it (talk_get with said true, or the meeting\'s page in the app); the meeting writes again only the sections changed since. It uses credits: call it with estimate true first and tell the person the credits it is expected to use (credits; at most maximumCredits). Returns at once while the sections are written; talk_get shows the progress (writing) and the result.',
+    input: { meeting: uuid('meeting'), estimate: z.boolean().optional().describe('Only say what writing would cost, writing nothing (default false)') },
+    async run(context, input) {
+      const client = await context.client();
+      const route = `/api/sessions/${input.meeting}/talk/write`;
+      const cost = (estimate: any) => ({ sections: estimate.sections, credits: creditsForCost(estimate.costMicro), maximumCredits: creditsForCost(estimate.maximumMicro) });
+      try {
+        if (input.estimate) return { estimate: cost((await client.request('GET', route)).estimate) };
+        const { talk, estimate } = await client.request('POST', route, { json: {} });
+        return { ...talkOut(talk), estimate: cost(estimate) };
+      } catch (error) {
+        if (olderService(error)) throw new PreppedError('This Prepped writes what to say only when the meeting is activated. Update Prepped to write it before the meeting.', (error as PreppedError).status, (error as PreppedError).code);
+        throw error;
+      }
+    },
   }),
   operation({
     name: 'talk_slides', title: 'Add a presentation\'s slides', effect: 'write',
@@ -966,7 +1063,7 @@ export const OPERATIONS: Operation[] = [
   }),
   operation({
     name: 'practice_create', title: 'Create a practice run', effect: 'write',
-    description: 'Creates an interview practice run, started and ready for answers: from question bank ids (questions), or from a meeting\'s expected and prepared questions (fromMeeting).',
+    description: 'Creates an interview practice run, started and ready for answers: from question bank ids (questions), or from a meeting\'s expected and prepared questions (fromMeeting). fromMeeting for a meeting that is not prepared but has expected questions has a model read them first, which spends credits and needs the paid permission.',
     input: { title: z.string().min(1).max(160).optional().describe('Required with questions'), questions: z.array(z.string().min(1).max(100)).min(1).max(20).optional().describe('Question bank ids'),
       fromMeeting: uuid('meeting').optional(), model: model.describe('Model that gives feedback (a model id from whoami)'), language: language.optional().describe('Practice language (default en)'),
       resume: uuid('resume').optional(), jobDescription: z.string().max(8000).optional() },
